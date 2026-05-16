@@ -1,5 +1,6 @@
 import { execSync, exec } from 'child_process';
 import { promisify } from 'util';
+import { getProvider, DEFAULT_PROVIDER } from './providers.js';
 
 const execAsync = promisify(exec);
 
@@ -35,6 +36,7 @@ export function listSessions() {
         activity: parseInt(activity) * 1000,
         task: meta.task || null,
         status: meta.status || 'running',
+        provider: meta.provider || DEFAULT_PROVIDER,
         pendingApproval: meta.pendingApproval || null,
       };
     });
@@ -44,21 +46,22 @@ export function getSession(name) {
   return listSessions().find(s => s.name === name) || null;
 }
 
-export function createSession(name, task, workdir = process.env.HOME) {
+export function createSession(name, task, provider = DEFAULT_PROVIDER, workdir = process.env.HOME) {
   try {
     tmux('new-session', '-d', '-s', name, '-c', workdir);
   } catch (e) {
     if (!e.message.includes('duplicate session')) throw e;
   }
-  sessionMeta.set(name, { task, status: 'running', pendingApproval: null });
-  sendKeys(name, `codex --no-alt-screen -a untrusted "${task.replace(/"/g, '\\"')}"`, true);
+  sessionMeta.set(name, { task, provider, status: 'running', pendingApproval: null });
+  const cmd = getProvider(provider).launch(task);
+  sendKeys(name, cmd, true);
   return getSession(name);
 }
 
 export function sendKeys(name, keys, enter = false) {
   execSync(`tmux send-keys -t ${name} -l ${JSON.stringify(keys)}`, { encoding: 'utf8' });
   if (enter) {
-    // Small delay lets the Codex TUI register the text before Enter fires
+    // Small delay lets the TUI register the text before Enter fires
     setTimeout(() => {
       execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' });
     }, 300);
@@ -80,21 +83,12 @@ export function killSession(name) {
   sessionMeta.delete(name);
 }
 
-// Watch for Codex approval prompts in a session
-const APPROVAL_PATTERNS = [
-  /Would you like to make the following edits/i,
-  /Press enter to confirm or esc to cancel/i,
-  /Yes, proceed/i,
-  /\[\s*y\/n\s*\]/i,
-  /approve\?/i,
-  /allow this action/i,
-  /\(yes\/no\)/i,
-];
-
 export function checkForApprovalPrompt(name) {
+  const meta = sessionMeta.get(name) || {};
+  const provider = getProvider(meta.provider);
   const output = captureOutput(name, 20);
   const lastLines = output.split('\n').slice(-5).join('\n');
-  return APPROVAL_PATTERNS.some(p => p.test(lastLines));
+  return provider.approvalPatterns.some(p => p.test(lastLines));
 }
 
 export function setApprovalPending(name, promptText) {
@@ -115,7 +109,6 @@ export function respondToApproval(name, approved) {
   if (approved) {
     execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' });
   } else {
-    // Escape cancels
     execSync(`tmux send-keys -t ${name} Escape`, { encoding: 'utf8' });
   }
   clearApproval(name);

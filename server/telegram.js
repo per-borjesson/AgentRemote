@@ -1,5 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { respondToApproval, listSessions, createSession, killSession, captureOutput, sendKeys } from './sessions.js';
+import { PROVIDERS, getProvider, DEFAULT_PROVIDER } from './providers.js';
 
 let bot = null;
 let chatId = null;
@@ -10,8 +11,14 @@ const connectState = {
   messageId: null,      // the disconnect button message
   interval: null,
   sentResponses: new Set(),
-  lastResponseMsgId: null,   // message id of the most recently sent response
-  lastResponseText: null,    // its content — so we can detect in-place growth
+  lastResponseMsgId: null,
+  lastResponseText: null,
+};
+
+// State for the /new provider-picker flow
+const pendingNew = {
+  provider: null,
+  messageId: null,
 };
 
 export function initTelegram(token, targetChatId, onBroadcast) {
@@ -35,11 +42,35 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     };
   }
 
-  // Passthrough when connected
+  // Passthrough when connected — or capture name|task after provider picker
   bot.on('message', guard(async (msg) => {
     if (!isAuthorized(msg)) return;
     if (!msg.text) return;
     if (msg.text.startsWith('/')) return;
+
+    // Pending /new: user is supplying "name | task"
+    if (pendingNew.provider) {
+      const parts = msg.text.split('|');
+      if (parts.length < 2) {
+        return bot.sendMessage(chatId, 'Please use format: `name | task description`', { parse_mode: 'Markdown' });
+      }
+      const name = parts[0].trim().replace(/\s+/g, '-');
+      const task = parts.slice(1).join('|').trim();
+      const provider = pendingNew.provider;
+      const prov = getProvider(provider);
+      pendingNew.provider = null;
+      if (pendingNew.messageId) {
+        await bot.editMessageText(
+          `${prov.icon} *${prov.label}* session \`${name}\` starting…\n_${task}_`,
+          { chat_id: chatId, message_id: pendingNew.messageId, parse_mode: 'Markdown' }
+        ).catch(() => {});
+        pendingNew.messageId = null;
+      }
+      createSession(name, task, provider);
+      broadcastFn({ type: 'session_created', session: { name, task, provider } });
+      return;
+    }
+
     if (connectState.session) sendKeys(connectState.session, msg.text, true);
   }));
 
@@ -49,17 +80,50 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     await sendSessionList();
   }));
 
-  // /new name | task
-  bot.onText(/^\/new (.+)$/, guard(async (msg, match) => {
+  // /new — no args → provider picker; with args → create codex session (backward compat)
+  // Also: /new <provider> name | task
+  bot.onText(/^\/new(.*)$/, guard(async (msg, match) => {
     if (!isAuthorized(msg)) return;
-    const parts = match[1].split('|');
+    const rest = match[1].trim();
+
+    if (!rest) {
+      // Show provider picker
+      const sent = await bot.sendMessage(chatId, 'Choose AI provider:', {
+        reply_markup: {
+          inline_keyboard: [
+            Object.entries(PROVIDERS).map(([key, p]) => ({
+              text: `${p.icon} ${p.label}`,
+              callback_data: `new-provider:${key}`,
+            })),
+          ],
+        },
+      });
+      pendingNew.messageId = sent.message_id;
+      return;
+    }
+
+    // Check if first word is a known provider key
+    const words = rest.split(/\s+/);
+    let provider = DEFAULT_PROVIDER;
+    let remainder = rest;
+    if (PROVIDERS[words[0]]) {
+      provider = words[0];
+      remainder = rest.slice(words[0].length).trim();
+    }
+
+    const parts = remainder.split('|');
     if (parts.length < 2)
-      return bot.sendMessage(chatId, 'Usage: `/new session-name | task description`', { parse_mode: 'Markdown' });
+      return bot.sendMessage(chatId,
+        'Usage: `/new name | task` or `/new claude name | task`',
+        { parse_mode: 'Markdown' });
     const name = parts[0].trim().replace(/\s+/g, '-');
     const task = parts.slice(1).join('|').trim();
-    createSession(name, task);
-    broadcastFn({ type: 'session_created', session: { name, task } });
-    await bot.sendMessage(chatId, `🚀 Session \`${name}\` started\n_${task}_`, { parse_mode: 'Markdown' });
+    const prov = getProvider(provider);
+    createSession(name, task, provider);
+    broadcastFn({ type: 'session_created', session: { name, task, provider } });
+    await bot.sendMessage(chatId,
+      `${prov.icon} *${prov.label}* session \`${name}\` started\n_${task}_`,
+      { parse_mode: 'Markdown' });
   }));
 
   // /output [name]
@@ -100,15 +164,20 @@ export function initTelegram(token, targetChatId, onBroadcast) {
   // /help
   bot.onText(/^\/help$/, guard(async (msg) => {
     if (!isAuthorized(msg)) return;
+    const providerList = Object.values(PROVIDERS).map(p => `${p.icon} ${p.label}`).join(', ');
     await bot.sendMessage(chatId, [
-      '*Codex Mobile*',
+      '*AgentRemote*',
       '',
       '`/list` — browse sessions',
-      '`/new name | task` — start a session',
+      '`/new` — start a session (provider picker)',
+      '`/new name | task` — start a Codex session',
+      '`/new claude name | task` — start a Claude session',
       '`/output [name]` — get latest output',
       '`/send name | text` — send input',
       '`/kill [name]` — kill a session',
       '`/disconnect` — exit connect mode',
+      '',
+      `_Providers: ${providerList}_`,
     ].join('\n'), { parse_mode: 'Markdown' });
   }));
 
@@ -118,34 +187,45 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     await bot.answerCallbackQuery(query.id);
 
     const colonIdx = query.data.indexOf(':');
-    const action = query.data.slice(0, colonIdx);
-    const sessionName = query.data.slice(colonIdx + 1);
+    const action = colonIdx >= 0 ? query.data.slice(0, colonIdx) : query.data;
+    const payload = colonIdx >= 0 ? query.data.slice(colonIdx + 1) : '';
+
+    if (action === 'new-provider') {
+      const prov = getProvider(payload);
+      pendingNew.provider = payload;
+      pendingNew.messageId = query.message.message_id;
+      await bot.editMessageText(
+        `${prov.icon} *${prov.label}* selected\n\nNow send: \`session-name | task description\``,
+        { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'Markdown' }
+      ).catch(() => {});
+      return;
+    }
 
     if (action === 'approve' || action === 'reject') {
       const approved = action === 'approve';
-      respondToApproval(sessionName, approved);
-      broadcastFn({ type: 'approval_response', session: sessionName, approved });
+      respondToApproval(payload, approved);
+      broadcastFn({ type: 'approval_response', session: payload, approved });
       await bot.editMessageText(
-        `${approved ? '✅ Approved' : '❌ Rejected'} — \`${sessionName}\``,
+        `${approved ? '✅ Approved' : '❌ Rejected'} — \`${payload}\``,
         { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'Markdown' }
       ).catch(() => {});
     }
 
-    if (action === 'session') await showSessionMenu(query, sessionName);
+    if (action === 'session') await showSessionMenu(query, payload);
 
     if (action === 'menu-output') {
-      await sendOutput(sessionName);
+      await sendOutput(payload);
       await bot.deleteMessage(query.message.chat.id, query.message.message_id).catch(() => {});
     }
 
     if (action === 'menu-connect') {
       await bot.deleteMessage(query.message.chat.id, query.message.message_id).catch(() => {});
-      await startConnect(sessionName);
+      await startConnect(payload);
     }
 
     if (action === 'menu-kill') {
-      await doKill(sessionName);
-      await bot.editMessageText(`🗑 Session \`${sessionName}\` killed.`,
+      await doKill(payload);
+      await bot.editMessageText(`🗑 Session \`${payload}\` killed.`,
         { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'Markdown' }
       ).catch(() => {});
     }
@@ -161,7 +241,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
 
   bot.setMyCommands([
     { command: 'list',       description: 'Browse active sessions' },
-    { command: 'new',        description: 'Start a session: /new name | task' },
+    { command: 'new',        description: 'Start a session (shows provider picker)' },
     { command: 'output',     description: 'Get output: /output name' },
     { command: 'send',       description: 'Send input: /send name | text' },
     { command: 'kill',       description: 'Kill a session: /kill name' },
@@ -177,19 +257,21 @@ export function initTelegram(token, targetChatId, onBroadcast) {
 async function startConnect(name) {
   if (connectState.session) stopConnectPolling();
 
-  // Send the header with disconnect button — this stays pinned
+  const session = listSessions().find(s => s.name === name);
+  const prov = getProvider(session?.provider);
+
   const sent = await bot.sendMessage(
     chatId,
-    `🔌 *Connected to \`${name}\`*\n_Type any message to send. Tap Disconnect to exit._`,
+    `🔌 *Connected to \`${name}\`* ${prov.icon}\n_Type any message to send. Tap Disconnect to exit._`,
     { parse_mode: 'Markdown', reply_markup: disconnectMarkup(name) }
   );
 
-  // Snapshot: collect all existing • responses so we don't re-send them
+  // Snapshot existing responses so we don't re-send them on connect
   const existing = captureOutput(name, 500) || '';
-  const existingResponses = extractResponses(existing);
+  const existingResponses = prov.extractResponses(existing);
   connectState.sentResponses = new Set(existingResponses.map(r => r.trim()));
 
-  // Send last 3 responses as "you are here" context
+  // Send last 3 responses as context
   const snapshot = existingResponses.slice(-3).join('\n\n').trim();
   if (snapshot) await bot.sendMessage(chatId, snapshot).catch(() => {});
 
@@ -198,15 +280,18 @@ async function startConnect(name) {
 
   connectState.interval = setInterval(async () => {
     if (!connectState.session) return;
+
+    const currentSession = listSessions().find(s => s.name === connectState.session);
+    const currentProv = getProvider(currentSession?.provider);
+
     const fresh = captureOutput(connectState.session, 500) || '';
     if (!fresh) return;
 
-    const allResponses = extractResponses(fresh);
+    const allResponses = currentProv.extractResponses(fresh);
     for (const r of allResponses) {
       const text = r.trim();
       if (connectState.sentResponses.has(text)) continue;
 
-      // If this response is a grown version of the last one, edit instead of sending new
       if (
         connectState.lastResponseMsgId &&
         connectState.lastResponseText &&
@@ -222,7 +307,10 @@ async function startConnect(name) {
         }).catch(() => {});
       } else {
         connectState.sentResponses.add(text);
-        const sent = await bot.sendMessage(chatId, text).catch(e => { console.error('[poll] send error:', e.message); return null; });
+        const sent = await bot.sendMessage(chatId, text).catch(e => {
+          console.error('[poll] send error:', e.message);
+          return null;
+        });
         if (sent) {
           connectState.lastResponseMsgId = sent.message_id;
           connectState.lastResponseText = text;
@@ -254,106 +342,29 @@ function stopConnectPolling() {
   connectState.lastResponseText = null;
 }
 
-// Extract all • response blocks from tmux output.
-// A block starts with • and continues until the next •, a › prompt, or a separator.
-function extractResponses(output) {
-  const lines = output.split('\n');
-  const responses = [];
-  let block = null;
-  let trailingEmpties = 0;
-
-  const flush = () => {
-    if (block !== null) {
-      responses.push(block.trim());
-      block = null;
-      trailingEmpties = 0;
-    }
-  };
-
-  for (const line of lines) {
-    const isResponse = /^\s*•\s/.test(line) && !/[◦•] Working \(\d+s/.test(line);
-    const isPrompt   = /^\s*›/.test(line);
-    const isSep      = /^─{5,}/.test(line);
-    const isEmpty    = !line.trim();
-
-    if (isResponse) {
-      flush();
-      block = line;
-      trailingEmpties = 0;
-    } else if (block !== null) {
-      if (isPrompt || isSep) {
-        flush();
-      } else if (isEmpty) {
-        trailingEmpties++;
-        block += '\n';
-      } else {
-        // Non-empty continuation — part of this block
-        block += '\n'.repeat(trailingEmpties + 1) + line;
-        trailingEmpties = 0;
-      }
-    }
-  }
-  flush();
-  return responses.filter(Boolean);
-}
-
-const NOISE_PATTERNS = [
-  /gpt-\S+.*·/,           // model status: "gpt-5.5 medium · ~"
-  /[◦•] Working \(\d+s/,  // working spinner
-  /esc to interrupt/,
-  /Press enter to confirm/,
-  /^\s*›/,                // echoed input + ghost suggestions
-  /^\s*[╭╰│─]/,           // TUI box drawing characters
-  /Codex \(v\d/,
-  /model:.*\/model/,
-  /directory:/,
-  /^  Tip:/,
-  /let's\s*\n?\s*build together/,
-];
-
-function isNoisyLine(line) {
-  return NOISE_PATTERNS.some(p => p.test(line));
-}
-
-// Split output into meaningful chunks to send as separate messages
-function splitIntoChunks(text) {
-  const SEPARATOR = /─{10,}/;
-  // Split on Codex horizontal separators or double newlines
-  const parts = text.split(/\n(?=─{10,})|\n{3,}/);
-  const chunks = [];
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed || SEPARATOR.test(trimmed)) continue;
-    // Telegram max message length is 4096 — split if needed
-    if (trimmed.length <= 4000) {
-      chunks.push(trimmed);
-    } else {
-      for (let i = 0; i < trimmed.length; i += 4000) {
-        chunks.push(trimmed.slice(i, i + 4000));
-      }
-    }
-  }
-  return chunks;
-}
-
 function disconnectMarkup(name) {
   return { inline_keyboard: [[{ text: '⏹ Disconnect', callback_data: `do-disconnect:${name}` }]] };
 }
 
 // --- Helpers ---
 
+function sessionIcon(s) {
+  const prov = getProvider(s.provider);
+  const statusIcon = s.status === 'waiting' ? '⏳' : prov.icon;
+  return statusIcon;
+}
+
 async function sendSessionList() {
   const sessions = listSessions();
   if (!sessions.length) return bot.sendMessage(chatId, '📭 No active sessions.');
-  const lines = sessions.map(s => {
-    const icon = s.status === 'waiting' ? '⏳' : '🟢';
-    return `${icon} \`${s.name}\` — ${s.task || '—'} _${formatAge(s.created)}_`;
-  });
+  const lines = sessions.map(s =>
+    `${sessionIcon(s)} \`${s.name}\` — ${s.task || '—'} _${formatAge(s.created)}_`
+  );
   await bot.sendMessage(chatId, lines.join('\n') + '\n\n_Tap a session to manage it:_', {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: sessions.map(s => [{
-        text: `${s.status === 'waiting' ? '⏳' : '🟢'} ${s.name} — ${truncate(s.task || '—', 30)}`,
+        text: `${sessionIcon(s)} ${s.name} — ${truncate(s.task || '—', 28)}`,
         callback_data: `session:${s.name}`,
       }]),
     },
@@ -367,17 +378,16 @@ async function editToSessionList(query) {
       { chat_id: query.message.chat.id, message_id: query.message.message_id }
     ).catch(() => {});
   }
-  const lines = sessions.map(s => {
-    const icon = s.status === 'waiting' ? '⏳' : '🟢';
-    return `${icon} \`${s.name}\` — ${s.task || '—'} _${formatAge(s.created)}_`;
-  });
+  const lines = sessions.map(s =>
+    `${sessionIcon(s)} \`${s.name}\` — ${s.task || '—'} _${formatAge(s.created)}_`
+  );
   await bot.editMessageText(lines.join('\n') + '\n\n_Tap a session to manage it:_', {
     chat_id: query.message.chat.id,
     message_id: query.message.message_id,
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: sessions.map(s => [{
-        text: `${s.status === 'waiting' ? '⏳' : '🟢'} ${s.name} — ${truncate(s.task || '—', 30)}`,
+        text: `${sessionIcon(s)} ${s.name} — ${truncate(s.task || '—', 28)}`,
         callback_data: `session:${s.name}`,
       }]),
     },
@@ -386,9 +396,10 @@ async function editToSessionList(query) {
 
 async function showSessionMenu(query, name) {
   const session = listSessions().find(s => s.name === name);
-  const icon = session?.status === 'waiting' ? '⏳' : '🟢';
+  const prov = getProvider(session?.provider);
+  const icon = session?.status === 'waiting' ? '⏳' : prov.icon;
   await bot.editMessageText(
-    `${icon} *${name}*\n_${session?.task || '—'}_ · ${formatAge(session?.created || Date.now())}`, {
+    `${icon} *${name}* [${prov.label}]\n_${session?.task || '—'}_ · ${formatAge(session?.created || Date.now())}`, {
     chat_id: query.message.chat.id,
     message_id: query.message.message_id,
     parse_mode: 'Markdown',
@@ -421,13 +432,15 @@ async function doKill(name) {
 
 export async function sendApprovalRequest(sessionName, promptText) {
   if (!bot || !chatId) return;
+  const session = listSessions().find(s => s.name === sessionName);
+  const prov = getProvider(session?.provider);
   const lines = promptText.split('\n');
   const cmdIdx = lines.findIndex(l => l.includes('$ '));
   const relevant = cmdIdx >= 0
     ? lines.slice(Math.max(0, cmdIdx - 1), cmdIdx + 4).join('\n')
     : lines.slice(-8).join('\n');
   await bot.sendMessage(chatId,
-    `⏳ *Approval needed* — \`${sessionName}\`\n\n\`\`\`\n${relevant.slice(0, 600)}\n\`\`\``,
+    `⏳ *Approval needed* — \`${sessionName}\` ${prov.icon}\n\n\`\`\`\n${relevant.slice(0, 600)}\n\`\`\``,
     {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: [[

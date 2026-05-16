@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Codex Mobile</title>
+  <title>AgentRemote</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -14,7 +14,7 @@
   <div id="app">
     <div id="login-screen" class="screen">
       <div class="login-box">
-        <h1>Codex</h1>
+        <h1>AgentRemote</h1>
         <input id="token-input" type="password" placeholder="Auth token" autocomplete="current-password">
         <button id="login-btn">Connect</button>
         <p id="login-error" class="error hidden"></p>
@@ -63,8 +63,13 @@
     <div id="new-session-modal" class="modal hidden">
       <div class="modal-box">
         <h2>New Session</h2>
+        <select id="ns-provider">
+          <option value="codex">⚡ Codex</option>
+          <option value="claude">🟣 Claude</option>
+          <option value="gemini">✨ Gemini</option>
+        </select>
         <input id="ns-name" type="text" placeholder="Session name (e.g. fix-auth)">
-        <input id="ns-task" type="text" placeholder="Task for Codex...">
+        <input id="ns-task" type="text" placeholder="Task description...">
         <input id="ns-workdir" type="text" placeholder="Working directory (optional)">
         <div class="modal-actions">
           <button id="ns-cancel">Cancel</button>

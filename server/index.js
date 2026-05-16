@@ -37,10 +37,10 @@ app.get('/api/sessions', (req, res) => {
 });
 
 app.post('/api/sessions', (req, res) => {
-  const { name, task, workdir } = req.body;
+  const { name, task, provider, workdir } = req.body;
   if (!name || !task) return res.status(400).json({ error: 'name and task required' });
   try {
-    const session = createSession(name, task, workdir);
+    const session = createSession(name, task, provider, workdir);
     broadcast({ type: 'session_created', session });
     sendNotification(`🚀 Session *${name}* started\n_${task}_`).catch(() => {});
     res.json(session);

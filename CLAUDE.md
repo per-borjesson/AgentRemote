@@ -13,7 +13,7 @@ Requires a `.env` file (see `.env.example`). The server will exit on startup if 
 
 ## Architecture
 
-A Node.js (ESM) server that bridges **OpenAI Codex CLI** sessions — running in tmux on the VM — to a mobile-first PWA and a Telegram bot.
+A Node.js (ESM) server that bridges AI CLI sessions (Codex, Claude, Gemini) — running in tmux on the VM — to a mobile-first PWA and a Telegram bot.
 
 ```
 public/          Vanilla JS PWA (no framework)
@@ -21,15 +21,28 @@ server/
   index.js       Express + WebSocket server, 2s polling loop
   sessions.js    tmux session lifecycle and output capture
   telegram.js    Telegram bot — commands, connect mode, approvals
+  providers.js   Per-provider config: launch command, response parser, patterns
 ```
+
+### Provider layer (`providers.js`)
+
+Each provider (codex, claude, gemini) defines:
+- `launch(task)` — the shell command to run in tmux
+- `extractResponses(output)` — parses provider-specific TUI output into response blocks
+- `approvalPatterns` — regexes that detect permission prompts
+- `noisePatterns` — TUI chrome to filter before forwarding to Telegram
+
+Codex uses `•`-prefixed response blocks. Claude and Gemini use text blocks delimited by prompt lines (`❯`/`>`). Patterns can be tuned in `providers.js` once a CLI is installed.
 
 ### Session layer (`sessions.js`)
 
-Sessions are tmux windows. Codex is launched as:
+Sessions are tmux windows. The launch command comes from the provider:
 ```
-codex --no-alt-screen -a untrusted "<task>"
+codex --no-alt-screen -a untrusted "<task>"   # codex
+claude --dangerously-skip-permissions "<task>" # claude
+gemini "<task>"                                # gemini
 ```
-`--no-alt-screen` keeps output in the tmux scrollback buffer instead of the alternate screen. Session metadata (task, status, pendingApproval) is in-memory only — it resets on server restart, but the tmux session survives.
+Session metadata (task, provider, status, pendingApproval) is in-memory only — it resets on server restart, but the tmux session survives.
 
 `sendKeys` sends literal text via `tmux send-keys -l`, then fires `Enter` with a 300ms delay to let the Codex TUI register the input before submitting.
 

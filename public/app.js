@@ -94,7 +94,7 @@
       <div class="session-card" data-name="${s.name}">
         <div class="status-dot ${s.status}"></div>
         <div class="info">
-          <div class="name">${esc(s.name)}</div>
+          <div class="name">${esc(s.name)} <span class="provider-badge">${esc(providerIcon(s.provider))}</span></div>
           <div class="task">${esc(s.task || '—')}</div>
         </div>
       </div>
@@ -221,9 +221,10 @@
     const name = document.getElementById('ns-name').value.trim();
     const task = document.getElementById('ns-task').value.trim();
     const workdir = document.getElementById('ns-workdir').value.trim();
+    const provider = document.getElementById('ns-provider').value;
     if (!name || !task) return;
     closeModal();
-    const res = await api('POST', '/api/sessions', { name, task, workdir: workdir || undefined });
+    const res = await api('POST', '/api/sessions', { name, task, provider, workdir: workdir || undefined });
     if (res) {
       await refreshSessions();
       openSession(name);
@@ -244,6 +245,9 @@
       return null;
     }
   }
+
+  const PROVIDER_ICONS = { codex: '⚡', claude: '🟣', gemini: '✨' };
+  function providerIcon(p) { return PROVIDER_ICONS[p] || '⚡'; }
 
   function esc(str) {
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
