@@ -36,37 +36,36 @@ function extractCodexResponses(output) {
 }
 
 // ── Claude CLI ────────────────────────────────────────────────────────────
-// Claude CLI renders responses as plain text blocks between ❯ prompt lines.
-// Response text is stripped of ANSI and leading/trailing whitespace.
+// Claude CLI uses ● as a response marker (similar to Codex's •).
+// Blocks continue until the next ❯ prompt, ✻ timing line, or ─── separator.
 
 function extractClaudeResponses(output) {
-  // Strip ANSI escape sequences
   const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
   const lines = clean.split('\n');
   const responses = [];
-  let block = [];
-  let afterInput = false;
+  let block = null;
+  let trailingEmpties = 0;
+
+  const flush = () => {
+    if (block !== null) { responses.push(block.trim()); block = null; trailingEmpties = 0; }
+  };
 
   for (const line of lines) {
-    const isPrompt = /^\s*[❯>]\s/.test(line) || /^\s*[❯>]\s*$/.test(line);
-    if (isPrompt) {
-      if (afterInput && block.length > 0) {
-        const text = block.join('\n').trim();
-        if (text) responses.push(text);
-      }
-      block = [];
-      // If prompt line has content, user submitted input — next lines are the response
-      afterInput = /^\s*[❯>]\s+\S/.test(line);
-    } else if (afterInput) {
-      block.push(line);
+    const isResponse = /^\s*●\s/.test(line);
+    const isPrompt   = /^\s*❯/.test(line);
+    const isSep      = /^─{5,}/.test(line);
+    const isTiming   = /^\s*✻/.test(line);
+    const isEmpty    = !line.trim();
+
+    if (isResponse) {
+      flush(); block = line.replace(/^\s*●\s*/, ''); trailingEmpties = 0;
+    } else if (block !== null) {
+      if (isPrompt || isSep || isTiming) { flush(); }
+      else if (isEmpty) { trailingEmpties++; block += '\n'; }
+      else { block += '\n'.repeat(trailingEmpties + 1) + line; trailingEmpties = 0; }
     }
   }
-
-  if (afterInput && block.length > 0) {
-    const text = block.join('\n').trim();
-    if (text) responses.push(text);
-  }
-
+  flush();
   return responses.filter(Boolean);
 }
 
@@ -152,11 +151,14 @@ export const PROVIDERS = {
       /bash command.*\?/i,
     ],
     noisePatterns: [
-      /^\s*[❯>]\s*$/,       // empty prompt line
-      /claude-[a-z0-9-]+/,  // model name status
-      /✻\s+Thinking/,
-      /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,
-      /^\s*\x1b/,           // raw ANSI-only lines
+      /^\s*❯/,                      // prompt lines
+      /Claude Code v[\d.]+/,        // version header
+      /Sonnet|Opus|Haiku.*·/,       // model status line
+      /▐▛|▝▜|▘▘/,                   // logo box-drawing
+      /✻\s+\w/,                     // timing/thinking indicator
+      /⏵⏵ bypass permissions/,      // status bar
+      /^─{5,}/,                     // separators
+      /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,     // spinners
     ],
   },
 

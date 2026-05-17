@@ -115,6 +115,8 @@
     currentSession = name;
     const session = _sessions.find(s => s.name === name);
     document.getElementById('session-title').textContent = name;
+    const wdEl = document.getElementById('session-workdir');
+    if (wdEl) wdEl.textContent = session?.workdir || '';
     document.getElementById('output').textContent = '';
     showScreen('session');
 

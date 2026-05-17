@@ -37,6 +37,7 @@ export function listSessions() {
         task: meta.task || null,
         status: meta.status || 'running',
         provider: meta.provider || DEFAULT_PROVIDER,
+        workdir: meta.workdir || null,
         pendingApproval: meta.pendingApproval || null,
       };
     });
@@ -46,13 +47,16 @@ export function getSession(name) {
   return listSessions().find(s => s.name === name) || null;
 }
 
-export function createSession(name, task, provider = DEFAULT_PROVIDER, workdir = process.env.HOME) {
+export function createSession(name, task, provider = DEFAULT_PROVIDER, workdir = null) {
+  // Default: ~/agents/<name> — each session gets its own isolated folder
+  const dir = workdir || `${process.env.HOME}/agents/${name}`;
+  execSync(`mkdir -p ${JSON.stringify(dir)}`);
   try {
-    tmux('new-session', '-d', '-s', name, '-c', workdir);
+    tmux('new-session', '-d', '-s', name, '-c', dir);
   } catch (e) {
     if (!e.message.includes('duplicate session')) throw e;
   }
-  sessionMeta.set(name, { task, provider, status: 'running', pendingApproval: null });
+  sessionMeta.set(name, { task, provider, workdir: dir, status: 'running', pendingApproval: null });
   const cmd = getProvider(provider).launch(task);
   sendKeys(name, cmd, true);
   return getSession(name);

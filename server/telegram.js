@@ -68,6 +68,8 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       }
       createSession(name, task, provider);
       broadcastFn({ type: 'session_created', session: { name, task, provider } });
+      // Auto-connect so responses stream through immediately
+      setTimeout(() => startConnect(name).catch(() => {}), 2000);
       return;
     }
 
@@ -121,9 +123,8 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     const prov = getProvider(provider);
     createSession(name, task, provider);
     broadcastFn({ type: 'session_created', session: { name, task, provider } });
-    await bot.sendMessage(chatId,
-      `${prov.icon} *${prov.label}* session \`${name}\` started\n_${task}_`,
-      { parse_mode: 'Markdown' });
+    // Auto-connect so responses stream through immediately
+    setTimeout(() => startConnect(name).catch(() => {}), 2000);
   }));
 
   // /output [name]
