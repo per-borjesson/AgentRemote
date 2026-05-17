@@ -5,18 +5,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm start          # production
+npm start                      # production
 node --watch server/index.js   # dev with auto-reload
 ```
 
-Requires a `.env` file (see `.env.example`). The server will exit on startup if `AUTH_TOKEN` is missing.
+Requires a `.env` file (see `.env.example`). The server exits on startup if `AUTH_TOKEN` is missing.
+
+After code changes, the running server must be restarted manually — there is no hot-reload in production.
 
 ## Architecture
 
-A Node.js (ESM) server that bridges AI CLI sessions (Codex, Claude, Gemini) — running in tmux on the VM — to a mobile-first PWA and a Telegram bot.
+A Node.js (ESM) server that bridges AI CLI sessions (Codex, Claude, Gemini) running in tmux on the VM to a mobile-first PWA and a Telegram bot.
 
 ```
-public/          Vanilla JS PWA (no framework)
+public/          Vanilla JS PWA (no framework, no build step)
 server/
   index.js       Express + WebSocket server, 2s polling loop
   sessions.js    tmux session lifecycle and output capture
@@ -27,44 +29,45 @@ server/
 ### Provider layer (`providers.js`)
 
 Each provider (codex, claude, gemini) defines:
-- `launch(task)` — the shell command to run in tmux
-- `extractResponses(output)` — parses provider-specific TUI output into response blocks
+- `launch(task)` — shell command run inside tmux
+- `extractResponses(output)` — parses TUI output into response text blocks
 - `approvalPatterns` — regexes that detect permission prompts
-- `noisePatterns` — TUI chrome to filter before forwarding to Telegram
+- `noisePatterns` — TUI chrome to strip before forwarding to Telegram
 
-Codex uses `•`-prefixed response blocks. Claude and Gemini use text blocks delimited by prompt lines (`❯`/`>`). Patterns can be tuned in `providers.js` once a CLI is installed.
+Launch commands:
+```
+codex --no-alt-screen -a untrusted "<task>"    # codex
+claude --dangerously-skip-permissions "<task>" # claude
+gemini --skip-trust "<task>"                   # gemini (--skip-trust skips workspace trust prompt)
+```
+
+Codex responses are `•`-prefixed blocks. Claude/Gemini responses are text blocks between `❯`/`>` prompt lines. All three strip ANSI codes before parsing.
 
 ### Session layer (`sessions.js`)
 
-Sessions are tmux windows. The launch command comes from the provider:
-```
-codex --no-alt-screen -a untrusted "<task>"   # codex
-claude --dangerously-skip-permissions "<task>" # claude
-gemini "<task>"                                # gemini
-```
-Session metadata (task, provider, status, pendingApproval) is in-memory only — it resets on server restart, but the tmux session survives.
+Sessions are tmux windows. Metadata (task, provider, status, pendingApproval) is in-memory only — resets on server restart, but the tmux session itself survives.
 
-`sendKeys` sends literal text via `tmux send-keys -l`, then fires `Enter` with a 300ms delay to let the Codex TUI register the input before submitting.
+`sendKeys` uses `tmux send-keys -l` (literal flag) to avoid shell interpretation, then fires `Enter` after a 300ms delay to let the TUI register the input.
+
+`checkForApprovalPrompt` uses the provider's own `approvalPatterns` against the last 5 lines of output.
 
 ### Polling loop (`index.js`)
 
-A 2-second `setInterval` in `index.js` does two things:
-1. Pushes `captureOutput` to any WebSocket clients subscribed to a session (`subscribe_output` message).
-2. Detects Codex approval prompts via `checkForApprovalPrompt` and triggers both a WebSocket broadcast and a Telegram notification.
+Every 2 seconds:
+1. Pushes `captureOutput` to WebSocket clients subscribed to a session.
+2. Checks for approval prompts → broadcasts `approval_needed` + sends Telegram inline keyboard.
 
-### Telegram connect mode (`telegram.js`)
+### Telegram bot (`telegram.js`)
 
-`connectState` holds a single active connection (one session at a time). When connected:
-- Any non-command Telegram message is forwarded to the session via `sendKeys`.
-- A 2-second interval calls `extractResponses()` on the full tmux output and compares against `sentResponses` (a `Set` of already-forwarded response texts).
-- If a response grew across poll cycles (partial → complete), the Telegram message is **edited in place** rather than sending a duplicate.
-
-`extractResponses` parses `•`-prefixed Codex response blocks, collecting continuation lines until the next `•`, a `›` prompt, or a `────` separator. The `NOISE_PATTERNS` array filters TUI chrome (model status, spinners, ghost suggestions, box-drawing characters) before anything is sent to Telegram.
+- `/new` with no args → inline provider picker; tapping a provider stores `pendingNew.provider` and the next plain-text message is treated as `name | task`.
+- `/new [provider] name | task` → creates session directly (provider optional, defaults to codex).
+- Connect mode: `connectState` holds one active session. Poll interval calls provider's `extractResponses`, tracks sent responses in a `Set`, edits in place if a response grew (partial → complete).
+- `guard(fn)` wraps all handlers — catches errors and sends them to the chat.
 
 ### PWA (`public/`)
 
-Single-page app with three views: login, session list, session detail. Auth token is stored in `localStorage`. WebSocket reconnects automatically on close. The session detail view subscribes to output via `{ type: "subscribe_output", session: name }`.
+Three views: login, session list, session detail. Token in `localStorage`. WebSocket auto-reconnects. New-session modal includes a provider dropdown. Session cards show provider icon (⚡/🟣/✨).
 
 ### Auth
 
-All `/api/*` routes require `x-token` header or `?token=` query param matching `AUTH_TOKEN`. WebSocket connections require `?token=` in the URL. Telegram handlers reject any `chat_id` that doesn't match `TELEGRAM_CHAT_ID`.
+`/api/*` requires `x-token` header or `?token=` query param. WebSocket requires `?token=` in URL. Telegram rejects any `chat_id` not matching `TELEGRAM_CHAT_ID`.
