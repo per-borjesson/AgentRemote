@@ -261,7 +261,9 @@ async function startConnect(name) {
 
   // Snapshot existing responses so we don't re-send them on connect
   const existing = captureOutput(name, 500) || '';
-  const existingResponses = prov.extractResponses(existing);
+  const filterNoise = (r) =>
+    r.split('\n').filter(line => !prov.noisePatterns.some(p => p.test(line))).join('\n').trim();
+  const existingResponses = prov.extractResponses(existing).map(filterNoise).filter(Boolean);
   connectState.sentResponses = new Set(existingResponses.map(r => r.trim()));
 
   // Send last 3 responses as context
@@ -280,7 +282,12 @@ async function startConnect(name) {
     const fresh = captureOutput(connectState.session, 500) || '';
     if (!fresh) return;
 
-    const allResponses = currentProv.extractResponses(fresh);
+    const allResponses = currentProv.extractResponses(fresh).map(r =>
+      r.split('\n')
+       .filter(line => !currentProv.noisePatterns.some(p => p.test(line)))
+       .join('\n').trim()
+    ).filter(Boolean);
+
     for (const r of allResponses) {
       const text = r.trim();
       if (connectState.sentResponses.has(text)) continue;

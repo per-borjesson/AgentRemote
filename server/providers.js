@@ -159,6 +159,7 @@ export const PROVIDERS = {
       /⏵⏵ bypass permissions/,      // status bar
       /^─{5,}/,                     // separators
       /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,     // spinners
+      /\b(low|medium|high)\s*·\s*\/effort/,  // effort indicator
     ],
   },
 
