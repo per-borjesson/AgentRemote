@@ -108,7 +108,7 @@ export const PROVIDERS = {
   codex: {
     label: 'Codex',
     icon: '⚡',
-    launch: (task) => `codex --no-alt-screen -a untrusted "${esc(task)}"`,
+    launch: (task) => task ? `codex --no-alt-screen -a untrusted "${esc(task)}"` : `codex --no-alt-screen -a untrusted`,
     extractResponses: extractCodexResponses,
     approvalPatterns: [
       /Would you like to (?:make the following edits|run the following command)/i,
@@ -139,7 +139,7 @@ export const PROVIDERS = {
     icon: '🟣',
     // --dangerously-skip-permissions disables interactive permission prompts so
     // the session behaves like Codex's -a untrusted mode (approvals via our UI).
-    launch: (task) => `claude --dangerously-skip-permissions "${esc(task)}"`,
+    launch: (task) => task ? `claude --dangerously-skip-permissions "${esc(task)}"` : `claude --dangerously-skip-permissions`,
     extractResponses: extractClaudeResponses,
     approvalPatterns: [
       /\[Y\/n\]/,
@@ -165,7 +165,7 @@ export const PROVIDERS = {
   gemini: {
     label: 'Gemini',
     icon: '✨',
-    launch: (task) => `gemini --skip-trust "${esc(task)}"`,
+    launch: (task) => task ? `gemini --skip-trust "${esc(task)}"` : `gemini --skip-trust`,
     extractResponses: extractGeminiResponses,
     approvalPatterns: [
       /\[Y\/n\]/,

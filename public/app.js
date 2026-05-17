@@ -221,12 +221,11 @@
 
   async function createSession() {
     const name = document.getElementById('ns-name').value.trim();
-    const task = document.getElementById('ns-task').value.trim();
     const workdir = document.getElementById('ns-workdir').value.trim();
     const provider = document.getElementById('ns-provider').value;
-    if (!name || !task) return;
+    if (!name) return;
     closeModal();
-    const res = await api('POST', '/api/sessions', { name, task, provider, workdir: workdir || undefined });
+    const res = await api('POST', '/api/sessions', { name, provider, workdir: workdir || undefined });
     if (res) {
       await refreshSessions();
       openSession(name);

@@ -48,27 +48,22 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     if (!msg.text) return;
     if (msg.text.startsWith('/')) return;
 
-    // Pending /new: user is supplying "name | task"
+    // Pending /new: user is supplying just a session name
     if (pendingNew.provider) {
-      const parts = msg.text.split('|');
-      if (parts.length < 2) {
-        return bot.sendMessage(chatId, 'Please use format: `name | task description`', { parse_mode: 'Markdown' });
-      }
-      const name = parts[0].trim().replace(/\s+/g, '-');
-      const task = parts.slice(1).join('|').trim();
+      const name = msg.text.trim().replace(/\s+/g, '-');
       const provider = pendingNew.provider;
       const prov = getProvider(provider);
       pendingNew.provider = null;
       if (pendingNew.messageId) {
         await bot.editMessageText(
-          `${prov.icon} *${prov.label}* session \`${name}\` starting…\n_${task}_`,
+          `${prov.icon} *${prov.label}* · \`${name}\` starting…`,
           { chat_id: chatId, message_id: pendingNew.messageId, parse_mode: 'Markdown' }
         ).catch(() => {});
         pendingNew.messageId = null;
       }
-      createSession(name, task, provider);
-      broadcastFn({ type: 'session_created', session: { name, task, provider } });
-      // Auto-connect so responses stream through immediately
+      createSession(name, null, provider);
+      broadcastFn({ type: 'session_created', session: { name, provider } });
+      // Auto-connect so you can start typing immediately
       setTimeout(() => startConnect(name).catch(() => {}), 2000);
       return;
     }
@@ -113,17 +108,14 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       remainder = rest.slice(words[0].length).trim();
     }
 
-    const parts = remainder.split('|');
-    if (parts.length < 2)
+    const name = remainder.trim().replace(/\s+/g, '-');
+    if (!name)
       return bot.sendMessage(chatId,
-        'Usage: `/new name | task` or `/new claude name | task`',
+        'Usage: `/new name` or `/new claude name`',
         { parse_mode: 'Markdown' });
-    const name = parts[0].trim().replace(/\s+/g, '-');
-    const task = parts.slice(1).join('|').trim();
     const prov = getProvider(provider);
-    createSession(name, task, provider);
-    broadcastFn({ type: 'session_created', session: { name, task, provider } });
-    // Auto-connect so responses stream through immediately
+    createSession(name, null, provider);
+    broadcastFn({ type: 'session_created', session: { name, provider } });
     setTimeout(() => startConnect(name).catch(() => {}), 2000);
   }));
 
@@ -171,8 +163,8 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       '',
       '`/list` — browse sessions',
       '`/new` — start a session (provider picker)',
-      '`/new name | task` — start a Codex session',
-      '`/new claude name | task` — start a Claude session',
+      '`/new name` — start a Codex session',
+      '`/new claude name` — start a Claude session',
       '`/output [name]` — get latest output',
       '`/send name | text` — send input',
       '`/kill [name]` — kill a session',
@@ -196,7 +188,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       pendingNew.provider = payload;
       pendingNew.messageId = query.message.message_id;
       await bot.editMessageText(
-        `${prov.icon} *${prov.label}* selected\n\nNow send: \`session-name | task description\``,
+        `${prov.icon} *${prov.label}* selected\n\nSend a session name:`,
         { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'Markdown' }
       ).catch(() => {});
       return;
@@ -242,7 +234,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
 
   bot.setMyCommands([
     { command: 'list',       description: 'Browse active sessions' },
-    { command: 'new',        description: 'Start a session (shows provider picker)' },
+    { command: 'new',        description: 'Start a session: /new name or pick provider' },
     { command: 'output',     description: 'Get output: /output name' },
     { command: 'send',       description: 'Send input: /send name | text' },
     { command: 'kill',       description: 'Kill a session: /kill name' },

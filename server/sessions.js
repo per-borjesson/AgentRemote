@@ -47,7 +47,7 @@ export function getSession(name) {
   return listSessions().find(s => s.name === name) || null;
 }
 
-export function createSession(name, task, provider = DEFAULT_PROVIDER, workdir = null) {
+export function createSession(name, task = null, provider = DEFAULT_PROVIDER, workdir = null) {
   // Default: ~/agents/<name> — each session gets its own isolated folder
   const dir = workdir || `${process.env.HOME}/agents/${name}`;
   execSync(`mkdir -p ${JSON.stringify(dir)}`);
