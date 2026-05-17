@@ -5,9 +5,10 @@ Control AI coding agents (Codex, Claude, Gemini) running on a remote VM — from
 ## What it does
 
 - **Start sessions** from Telegram or browser with any AI provider
+- **Auto-connect** — creating a session immediately starts streaming responses to Telegram
 - **Monitor output** in real time (WebSocket streaming in browser, push messages in Telegram)
 - **Approve/reject** tool-use prompts from your phone
-- **Connect mode** in Telegram — bidirectional passthrough to any session, with responses delivered as individual messages
+- **Per-session workdirs** — each session gets its own isolated folder under `~/agents/<name>`
 
 ## Setup
 
@@ -22,8 +23,8 @@ npm install -g @google/gemini-cli  # Gemini
 
 Authenticate each CLI before starting the server:
 ```bash
-claude        # then /login inside the TUI — OAuth via claude.ai account
-gemini        # then select "Sign in with Google" — uses personal Gmail
+claude        # OAuth via claude.ai account (run once, token persists)
+gemini        # Select "Sign in with Google" — use a personal Gmail account
 # Codex uses OPENAI_API_KEY from .env (no interactive login)
 ```
 
@@ -50,6 +51,8 @@ npm start                        # production
 node --watch server/index.js     # dev with auto-reload
 ```
 
+After code changes, restart the server manually — there is no hot-reload in production.
+
 ### 4. Access the browser PWA
 
 SSH port-forward from your laptop:
@@ -63,14 +66,24 @@ Then open `http://localhost:8888` and enter your `AUTH_TOKEN`.
 | Command | Description |
 |---|---|
 | `/new` | Start a session — shows provider picker (⚡ Codex / 🟣 Claude / ✨ Gemini) |
-| `/new name \| task` | Start a Codex session directly |
-| `/new claude name \| task` | Start a Claude session directly |
+| `/new name` | Start a Codex session directly |
+| `/new claude name` | Start a Claude session directly |
 | `/list` | Browse active sessions — tap to manage |
 | `/output name` | Get the last ~35 lines of output |
 | `/send name \| text` | Send input to a session |
-| `/kill name` | Kill a session |
+| `/kill name` | Kill a session (files on disk are untouched) |
 | `/disconnect` | Exit connect mode |
 | `/help` | Show command reference |
+
+### Session lifecycle
+
+1. `/new` → pick provider → send a name
+2. Connect mode starts automatically — responses stream to Telegram as they arrive
+3. Type messages directly to send them to the AI
+4. `/disconnect` to stop streaming (session keeps running)
+5. `/kill` to terminate the tmux session (workdir and files remain)
+
+Sessions default to `~/agents/<name>`. Override via the workdir field in the browser UI.
 
 ## Architecture
 
@@ -83,7 +96,7 @@ server/
   providers.js   Per-provider config: launch commands, parsers, patterns
 ```
 
-Sessions are **tmux windows** on the VM. The server is stateless beyond in-memory session metadata — tmux sessions survive server restarts.
+Sessions are **tmux windows** on the VM. The server is stateless beyond in-memory session metadata — tmux sessions survive server restarts but metadata resets.
 
 The 2-second polling loop streams output to subscribed WebSocket clients and detects approval prompts, triggering both a browser banner and a Telegram inline-keyboard notification.
 
@@ -95,10 +108,10 @@ Edit `server/providers.js` and add an entry to `PROVIDERS`:
 myprovider: {
   label: 'MyProvider',
   icon: '🔮',
-  launch: (task) => `mycli "${task.replace(/"/g, '\\"')}"`,
+  launch: (task) => task ? `mycli "${task.replace(/"/g, '\\"')}"` : `mycli`,
   extractResponses: (output) => { /* parse TUI output into string[] */ },
   approvalPatterns: [ /confirm\?/i ],
-  noisePatterns: [ /spinner/ ],
+  noisePatterns: [ /spinner/ ],   // filtered line-by-line before sending to Telegram
 }
 ```
 
