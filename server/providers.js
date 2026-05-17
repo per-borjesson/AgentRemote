@@ -163,7 +163,7 @@ export const PROVIDERS = {
   gemini: {
     label: 'Gemini',
     icon: '✨',
-    launch: (task) => `gemini "${esc(task)}"`,
+    launch: (task) => `gemini --skip-trust "${esc(task)}"`,
     extractResponses: extractGeminiResponses,
     approvalPatterns: [
       /\[Y\/n\]/,
