@@ -120,23 +120,6 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       return;
     }
 
-    // If a Claude questionnaire is pending, intercept bare numbers as selections
-    if (connectState.session && connectState.pendingQuestion) {
-      const choice = parseInt(msg.text.trim(), 10);
-      const { options, currentIndex } = connectState.pendingQuestion;
-      if (!isNaN(choice) && choice >= 1 && choice <= options.length) {
-        const targetIdx = choice - 1;
-        const delta = targetIdx - currentIndex;
-        const key = delta >= 0 ? 'Down' : 'Up';
-        for (let i = 0; i < Math.abs(delta); i++) {
-          execSync(`tmux send-keys -t ${connectState.session} ${key}`, { encoding: 'utf8' });
-        }
-        execSync(`tmux send-keys -t ${connectState.session} Enter`, { encoding: 'utf8' });
-        connectState.pendingQuestion = null;
-        return;
-      }
-    }
-
     if (connectState.session) sendKeys(connectState.session, msg.text, true);
   }));
 
@@ -292,6 +275,26 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       ).catch(() => {});
     }
 
+    if (action === 'question-answer') {
+      const targetIdx = parseInt(payload, 10);
+      const pq = connectState.pendingQuestion;
+      if (pq && connectState.session && targetIdx >= 0 && targetIdx < pq.options.length) {
+        const delta = targetIdx - pq.currentIndex;
+        const key = delta >= 0 ? 'Down' : 'Up';
+        for (let i = 0; i < Math.abs(delta); i++) {
+          execSync(`tmux send-keys -t ${connectState.session} ${key}`, { encoding: 'utf8' });
+        }
+        execSync(`tmux send-keys -t ${connectState.session} Enter`, { encoding: 'utf8' });
+        const chosen = pq.options[targetIdx];
+        await bot.editMessageText(
+          `✅ *${pq.question}*\n\n→ ${chosen.text}`,
+          { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'Markdown' }
+        ).catch(() => {});
+        connectState.pendingQuestion = null;
+      }
+      return;
+    }
+
     if (action === 'menu-back') await editToSessionList(query);
 
     if (action === 'do-disconnect') await disconnect('Disconnected.');
@@ -407,15 +410,21 @@ async function startConnect(name) {
           const questionKey = 'q:' + q.question;
           if (!connectState.sentResponses.has(questionKey)) {
             connectState.sentResponses.add(questionKey);
-            connectState.pendingQuestion = q;
+            connectState.pendingQuestion = { ...q, questionKey };
             const optLines = q.options.map((o, i) =>
               `*${i + 1}.* ${o.text}${o.desc ? `\n_${o.desc}_` : ''}`
             ).join('\n\n');
-            await bot.sendMessage(
+            // One button per option — tap to select, no typing needed
+            const keyboard = q.options.map((o, i) => [{
+              text: `${i + 1}. ${o.text}`,
+              callback_data: `question-answer:${i}`,
+            }]);
+            const qMsg = await bot.sendMessage(
               chatId,
-              `❓ *${q.question}*\n\n${optLines}\n\n_Reply with a number to select_`,
-              { parse_mode: 'Markdown' }
-            ).catch(() => {});
+              `❓ *${q.question}*\n\n${optLines}`,
+              { parse_mode: 'Markdown', reply_markup: { inline_keyboard: keyboard } }
+            ).catch(() => null);
+            if (qMsg) connectState.pendingQuestion.messageId = qMsg.message_id;
           }
         } else if (!q && connectState.pendingQuestion) {
           // Question dismissed (user answered in-app or it disappeared)
