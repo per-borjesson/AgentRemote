@@ -53,6 +53,8 @@ Sessions are tmux windows. Each session defaults to `~/agents/<name>` as its wor
 
 `checkForApprovalPrompt` uses the provider's own `approvalPatterns` against the last 5 lines of output.
 
+`detectProvider` recovers the provider after a server restart (when `sessionMeta` is wiped). It checks `#{pane_current_command}` first (the actual running process — reliable regardless of session age), then falls back to grepping the last 500 lines of scrollback for the launch command.
+
 Claude sessions automatically receive `/effort normal` 5 seconds after launch to prevent verbose over-thinking.
 
 ### Polling loop (`index.js`)
