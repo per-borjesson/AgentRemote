@@ -59,6 +59,10 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
   sessionMeta.set(name, { task, provider, workdir: dir, status: 'running', pendingApproval: null });
   const cmd = getProvider(provider).launch(task);
   sendKeys(name, cmd, true);
+  // Claude defaults to high effort — set normal so it doesn't over-think and spam tool-call messages
+  if (provider === 'claude') {
+    setTimeout(() => sendKeys(name, '/effort normal', true), 5000);
+  }
   return getSession(name);
 }
 

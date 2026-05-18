@@ -38,16 +38,25 @@ function extractCodexResponses(output) {
 // ── Claude CLI ────────────────────────────────────────────────────────────
 // Claude CLI uses ● as a response marker (similar to Codex's •).
 // Blocks continue until the next ❯ prompt, ✻ timing line, or ─── separator.
+// Tool-call blocks (● Update(...), ● Bash(...) etc.) are skipped — only
+// prose responses are forwarded to Telegram.
+
+// Matches tool-call ● lines: "● ToolName(..." or "● ToolName·..."
+const CLAUDE_TOOL_CALL = /^\s*●\s+[A-Z][a-zA-Z]+[·(]/;
+// Matches the feedback prompt Claude occasionally shows
+const CLAUDE_FEEDBACK  = /How is Claude doing this session/;
 
 function extractClaudeResponses(output) {
   const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
   const lines = clean.split('\n');
   const responses = [];
   let block = null;
+  let skipBlock = false;
   let trailingEmpties = 0;
 
   const flush = () => {
-    if (block !== null) { responses.push(block.trim()); block = null; trailingEmpties = 0; }
+    if (block !== null && !skipBlock) { responses.push(block.trim()); }
+    block = null; skipBlock = false; trailingEmpties = 0;
   };
 
   for (const line of lines) {
@@ -58,7 +67,11 @@ function extractClaudeResponses(output) {
     const isEmpty    = !line.trim();
 
     if (isResponse) {
-      flush(); block = line.replace(/^\s*●\s*/, ''); trailingEmpties = 0;
+      flush();
+      const text = line.replace(/^\s*●\s*/, '');
+      skipBlock = CLAUDE_TOOL_CALL.test(line) || CLAUDE_FEEDBACK.test(text);
+      block = text;
+      trailingEmpties = 0;
     } else if (block !== null) {
       if (isPrompt || isSep || isTiming) { flush(); }
       else if (isEmpty) { trailingEmpties++; block += '\n'; }

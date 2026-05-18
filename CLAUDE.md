@@ -41,7 +41,7 @@ claude --dangerously-skip-permissions ["<task>"] # claude
 gemini --skip-trust ["<task>"]                   # gemini (--skip-trust skips workspace trust prompt)
 ```
 
-Codex responses are `•`-prefixed blocks. Claude responses are `●`-prefixed blocks. Gemini uses text blocks between `>` prompt lines. All three strip ANSI codes before parsing.
+Codex responses are `•`-prefixed blocks. Claude responses are `●`-prefixed blocks — tool-call blocks (`● Update(...)`, `● Bash(...)` etc.) are skipped, only prose responses are forwarded. Gemini uses text blocks between `>` prompt lines. All three strip ANSI codes before parsing.
 
 `noisePatterns` are applied line-by-line to extracted responses in the connect-mode poll and on-connect snapshot before anything is sent to Telegram.
 
@@ -52,6 +52,8 @@ Sessions are tmux windows. Each session defaults to `~/agents/<name>` as its wor
 `sendKeys` uses `tmux send-keys -l` (literal flag) to avoid shell interpretation, then fires `Enter` after a 300ms delay to let the TUI register the input.
 
 `checkForApprovalPrompt` uses the provider's own `approvalPatterns` against the last 5 lines of output.
+
+Claude sessions automatically receive `/effort normal` 5 seconds after launch to prevent verbose over-thinking.
 
 ### Polling loop (`index.js`)
 
