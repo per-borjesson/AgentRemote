@@ -150,5 +150,5 @@ if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
 }
 
 server.listen(PORT, () => {
-  console.log(`codex-mobile running on http://localhost:${PORT}`);
+  console.log(`AgentRemote running on http://localhost:${PORT}`);
 });
