@@ -1,3 +1,4 @@
+import { execSync } from 'child_process';
 import TelegramBot from 'node-telegram-bot-api';
 import { respondToApproval, listSessions, createSession, killSession, captureOutput, sendKeys } from './sessions.js';
 import { PROVIDERS, getProvider, DEFAULT_PROVIDER } from './providers.js';
@@ -14,7 +15,60 @@ const connectState = {
   lastResponseMsgId: null,
   lastResponseText: null,
   polling: false,       // guard against overlapping async ticks
+  pendingQuestion: null, // active Claude questionnaire waiting for user's number
 };
+
+// Parse Claude Code's interactive questionnaire TUI from raw tmux output.
+// Returns { question, options: [{text, desc}], currentIndex } or null.
+function parseClaudeQuestion(output) {
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
+  if (!/Enter to select.*Tab.*Arrow keys.*navigate/i.test(clean)) return null;
+
+  const lines = clean.split('\n');
+  // Find the block: scan backwards from the "Enter to select" line
+  const footerIdx = lines.findIndex(l => /Enter to select.*Tab.*Arrow keys.*navigate/i.test(l));
+  if (footerIdx < 0) return null;
+
+  // Collect option lines (start with ❯ N. or spaces + N.)
+  const optionRe = /^\s*[❯\s]\s*(\d+)\.\s+(.+)/;
+  const descRe   = /^\s{4,}(.+)/; // continuation / description line (indented)
+  const sepRe    = /^─{5,}/;
+
+  const options = [];
+  let currentIndex = 0;
+  let questionLines = [];
+  let inOptions = false;
+
+  for (let i = 0; i < footerIdx; i++) {
+    const line = lines[i];
+    if (sepRe.test(line)) { inOptions = false; continue; }
+    if (/←.*☐/.test(line) || /☐.*→/.test(line)) continue; // breadcrumb nav bar
+
+    const optMatch = line.match(/^\s*([❯ ])\s*(\d+)\.\s+(.*)/);
+    if (optMatch) {
+      inOptions = true;
+      const selected = optMatch[1] === '❯';
+      const idx = options.length;
+      if (selected) currentIndex = idx;
+      options.push({ text: optMatch[3].trim(), desc: '' });
+      continue;
+    }
+
+    if (inOptions && options.length > 0 && descRe.test(line)) {
+      const last = options[options.length - 1];
+      last.desc = (last.desc ? last.desc + ' ' : '') + line.trim();
+      continue;
+    }
+
+    if (!inOptions && line.trim()) {
+      questionLines.push(line.trim());
+    }
+  }
+
+  if (options.length < 2) return null;
+  const question = questionLines.filter(Boolean).join(' ').trim();
+  return question ? { question, options, currentIndex } : null;
+}
 
 // State for the /new provider-picker flow
 const pendingNew = {
@@ -67,6 +121,23 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       // Auto-connect so you can start typing immediately
       setTimeout(() => startConnect(name).catch(() => {}), 2000);
       return;
+    }
+
+    // If a Claude questionnaire is pending, intercept bare numbers as selections
+    if (connectState.session && connectState.pendingQuestion) {
+      const choice = parseInt(msg.text.trim(), 10);
+      const { options, currentIndex } = connectState.pendingQuestion;
+      if (!isNaN(choice) && choice >= 1 && choice <= options.length) {
+        const targetIdx = choice - 1;
+        const delta = targetIdx - currentIndex;
+        const key = delta >= 0 ? 'Down' : 'Up';
+        for (let i = 0; i < Math.abs(delta); i++) {
+          execSync(`tmux send-keys -t ${connectState.session} ${key}`, { encoding: 'utf8' });
+        }
+        execSync(`tmux send-keys -t ${connectState.session} Enter`, { encoding: 'utf8' });
+        connectState.pendingQuestion = null;
+        return;
+      }
     }
 
     if (connectState.session) sendKeys(connectState.session, msg.text, true);
@@ -331,6 +402,29 @@ async function startConnect(name) {
           }
         }
       }
+
+      // Detect Claude interactive questionnaire (not a ●-prefixed response)
+      if (currentProv === getProvider('claude')) {
+        const q = parseClaudeQuestion(fresh);
+        if (q && !connectState.pendingQuestion) {
+          const questionKey = 'q:' + q.question;
+          if (!connectState.sentResponses.has(questionKey)) {
+            connectState.sentResponses.add(questionKey);
+            connectState.pendingQuestion = q;
+            const optLines = q.options.map((o, i) =>
+              `*${i + 1}.* ${o.text}${o.desc ? `\n_${o.desc}_` : ''}`
+            ).join('\n\n');
+            await bot.sendMessage(
+              chatId,
+              `❓ *${q.question}*\n\n${optLines}\n\n_Reply with a number to select_`,
+              { parse_mode: 'Markdown' }
+            ).catch(() => {});
+          }
+        } else if (!q && connectState.pendingQuestion) {
+          // Question dismissed (user answered in-app or it disappeared)
+          connectState.pendingQuestion = null;
+        }
+      }
     } finally {
       connectState.polling = false;
     }
@@ -358,6 +452,7 @@ function stopConnectPolling() {
   connectState.lastResponseMsgId = null;
   connectState.lastResponseText = null;
   connectState.polling = false;
+  connectState.pendingQuestion = null;
 }
 
 function disconnectMarkup(name) {
