@@ -53,6 +53,29 @@ node --watch server/index.js     # dev with auto-reload
 
 After code changes, restart the server manually — there is no hot-reload in production.
 
+### 3a. Run as a systemd service (recommended)
+
+Installs AgentRemote as a system service so it starts on boot and restarts automatically on failure:
+
+```bash
+sudo cp agentremote.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now agentremote
+```
+
+Check status / logs:
+```bash
+sudo systemctl status agentremote
+journalctl -u agentremote -f          # live logs
+```
+
+Restart after code changes:
+```bash
+sudo systemctl restart agentremote
+```
+
+The service runs as `myuser`, reads `.env` from the project directory, and has access to the user's tmux sessions.
+
 ### 4. Access the browser PWA
 
 SSH port-forward from your laptop:

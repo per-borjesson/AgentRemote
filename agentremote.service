@@ -1,0 +1,19 @@
+[Unit]
+Description=AgentRemote — AI agent bridge (Codex/Claude/Gemini)
+After=network.target
+
+[Service]
+Type=simple
+User=myuser
+WorkingDirectory=/home/myuser/codex-mobile
+EnvironmentFile=/home/myuser/codex-mobile/.env
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=5
+
+# Give the process access to the user's tmux socket and OAuth credentials
+Environment=HOME=/home/myuser
+Environment=TMUX_TMPDIR=/tmp
+
+[Install]
+WantedBy=multi-user.target

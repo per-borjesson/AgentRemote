@@ -5,13 +5,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm start                      # production
-node --watch server/index.js   # dev with auto-reload
+npm start                           # production (direct)
+node --watch server/index.js        # dev with auto-reload
+sudo systemctl restart agentremote  # restart systemd service (production)
+journalctl -u agentremote -f        # live service logs
 ```
 
 Requires a `.env` file (see `.env.example`). The server exits on startup if `AUTH_TOKEN` is missing.
 
-After code changes, restart the running server manually — there is no hot-reload in production.
+The production server runs as a systemd service (`agentremote.service`). After code changes, restart it with `sudo systemctl restart agentremote`.
 
 ## Architecture
 
