@@ -25,36 +25,33 @@ function parseClaudeQuestion(output) {
   if (!/Enter to select.*Tab.*Arrow keys.*navigate/i.test(clean)) return null;
 
   const lines = clean.split('\n');
-  // Find the block: scan backwards from the "Enter to select" line
   const footerIdx = lines.findIndex(l => /Enter to select.*Tab.*Arrow keys.*navigate/i.test(l));
   if (footerIdx < 0) return null;
 
-  // Collect option lines (start with ❯ N. or spaces + N.)
-  const optionRe = /^\s*[❯\s]\s*(\d+)\.\s+(.+)/;
-  const descRe   = /^\s{4,}(.+)/; // continuation / description line (indented)
-  const sepRe    = /^─{5,}/;
+  // The questionnaire block starts at the breadcrumb nav bar (← ☐/☒ ... →)
+  // Scan backwards from the footer to find it
+  const breadcrumbIdx = lines.slice(0, footerIdx).reduce((found, line, i) =>
+    /[←].*[☐☒]/.test(line) ? i : found, -1);
+  if (breadcrumbIdx < 0) return null;
 
   const options = [];
   let currentIndex = 0;
   let questionLines = [];
   let inOptions = false;
 
-  for (let i = 0; i < footerIdx; i++) {
+  for (let i = breadcrumbIdx + 1; i < footerIdx; i++) {
     const line = lines[i];
-    if (sepRe.test(line)) { inOptions = false; continue; }
-    if (/←.*☐/.test(line) || /☐.*→/.test(line)) continue; // breadcrumb nav bar
+    if (/^─{5,}/.test(line)) { inOptions = false; continue; }
 
     const optMatch = line.match(/^\s*([❯ ])\s*(\d+)\.\s+(.*)/);
     if (optMatch) {
       inOptions = true;
-      const selected = optMatch[1] === '❯';
-      const idx = options.length;
-      if (selected) currentIndex = idx;
+      if (optMatch[1] === '❯') currentIndex = options.length;
       options.push({ text: optMatch[3].trim(), desc: '' });
       continue;
     }
 
-    if (inOptions && options.length > 0 && descRe.test(line)) {
+    if (inOptions && options.length > 0 && /^\s{4,}/.test(line) && line.trim()) {
       const last = options[options.length - 1];
       last.desc = (last.desc ? last.desc + ' ' : '') + line.trim();
       continue;
