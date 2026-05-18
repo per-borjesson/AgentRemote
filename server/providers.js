@@ -166,7 +166,7 @@ export const PROVIDERS = {
     noisePatterns: [
       /^\s*❯/,                      // prompt lines
       /Claude Code v[\d.]+/,        // version header
-      /Sonnet|Opus|Haiku.*·/,       // model status line
+      /(?:Sonnet|Opus|Haiku).*·/,    // model status line
       /▐▛|▝▜|▘▘/,                   // logo box-drawing
       /✻\s+\w/,                     // timing/thinking indicator
       /⏵⏵ bypass permissions/,      // status bar
