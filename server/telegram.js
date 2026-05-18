@@ -13,6 +13,7 @@ const connectState = {
   sentResponses: new Set(),
   lastResponseMsgId: null,
   lastResponseText: null,
+  polling: false,       // guard against overlapping async ticks
 };
 
 // State for the /new provider-picker flow
@@ -266,56 +267,72 @@ async function startConnect(name) {
   const existingResponses = prov.extractResponses(existing).map(filterNoise).filter(Boolean);
   connectState.sentResponses = new Set(existingResponses.map(r => r.trim()));
 
-  // Send last 3 responses as context
-  const snapshot = existingResponses.slice(-3).join('\n\n').trim();
-  if (snapshot) await bot.sendMessage(chatId, snapshot).catch(() => {});
+  // Send last response separately so its message_id is tracked for edit-in-place;
+  // older context is sent first as a single non-tracked message.
+  const olderSnapshot = existingResponses.slice(-3, -1).join('\n\n').trim();
+  if (olderSnapshot) await bot.sendMessage(chatId, olderSnapshot).catch(() => {});
+  const lastExisting = existingResponses.at(-1);
+  if (lastExisting) {
+    const snapMsg = await bot.sendMessage(chatId, lastExisting).catch(() => null);
+    if (snapMsg) {
+      connectState.lastResponseMsgId = snapMsg.message_id;
+      connectState.lastResponseText = lastExisting;
+    }
+  }
 
   connectState.session = name;
   connectState.messageId = sent.message_id;
 
   connectState.interval = setInterval(async () => {
     if (!connectState.session) return;
+    // Guard against overlapping async ticks — if previous tick is still awaiting
+    // network calls, skip this tick rather than racing to send duplicate messages.
+    if (connectState.polling) return;
+    connectState.polling = true;
+    try {
+      const currentSession = listSessions().find(s => s.name === connectState.session);
+      const currentProv = getProvider(currentSession?.provider);
 
-    const currentSession = listSessions().find(s => s.name === connectState.session);
-    const currentProv = getProvider(currentSession?.provider);
+      const fresh = captureOutput(connectState.session, 500) || '';
+      if (!fresh) return;
 
-    const fresh = captureOutput(connectState.session, 500) || '';
-    if (!fresh) return;
+      const allResponses = currentProv.extractResponses(fresh).map(r =>
+        r.split('\n')
+         .filter(line => !currentProv.noisePatterns.some(p => p.test(line)))
+         .join('\n').trim()
+      ).filter(Boolean);
 
-    const allResponses = currentProv.extractResponses(fresh).map(r =>
-      r.split('\n')
-       .filter(line => !currentProv.noisePatterns.some(p => p.test(line)))
-       .join('\n').trim()
-    ).filter(Boolean);
+      for (const r of allResponses) {
+        const text = r.trim();
+        if (connectState.sentResponses.has(text)) continue;
 
-    for (const r of allResponses) {
-      const text = r.trim();
-      if (connectState.sentResponses.has(text)) continue;
-
-      if (
-        connectState.lastResponseMsgId &&
-        connectState.lastResponseText &&
-        text.startsWith(connectState.lastResponseText) &&
-        text !== connectState.lastResponseText
-      ) {
-        connectState.sentResponses.delete(connectState.lastResponseText);
-        connectState.sentResponses.add(text);
-        connectState.lastResponseText = text;
-        await bot.editMessageText(text, {
-          chat_id: chatId,
-          message_id: connectState.lastResponseMsgId,
-        }).catch(() => {});
-      } else {
-        connectState.sentResponses.add(text);
-        const sent = await bot.sendMessage(chatId, text).catch(e => {
-          console.error('[poll] send error:', e.message);
-          return null;
-        });
-        if (sent) {
-          connectState.lastResponseMsgId = sent.message_id;
+        if (
+          connectState.lastResponseMsgId &&
+          connectState.lastResponseText &&
+          text.startsWith(connectState.lastResponseText) &&
+          text !== connectState.lastResponseText
+        ) {
+          connectState.sentResponses.delete(connectState.lastResponseText);
+          connectState.sentResponses.add(text);
           connectState.lastResponseText = text;
+          await bot.editMessageText(text, {
+            chat_id: chatId,
+            message_id: connectState.lastResponseMsgId,
+          }).catch(() => {});
+        } else {
+          connectState.sentResponses.add(text);
+          const sent = await bot.sendMessage(chatId, text).catch(e => {
+            console.error('[poll] send error:', e.message);
+            return null;
+          });
+          if (sent) {
+            connectState.lastResponseMsgId = sent.message_id;
+            connectState.lastResponseText = text;
+          }
         }
       }
+    } finally {
+      connectState.polling = false;
     }
   }, 2000);
 }
@@ -340,6 +357,7 @@ function stopConnectPolling() {
   connectState.sentResponses = new Set();
   connectState.lastResponseMsgId = null;
   connectState.lastResponseText = null;
+  connectState.polling = false;
 }
 
 function disconnectMarkup(name) {
