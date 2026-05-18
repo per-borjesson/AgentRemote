@@ -16,6 +16,23 @@ async function tmuxAsync(...args) {
   return stdout.trim();
 }
 
+// Infer provider from the tmux pane's current process, then scrollback, when metadata is missing after restart
+function detectProvider(name) {
+  try {
+    const cmd = execSync(`tmux display-message -p -t ${name} '#{pane_current_command}'`, { encoding: 'utf8' }).trim().toLowerCase();
+    if (cmd.includes('claude')) return 'claude';
+    if (cmd.includes('gemini')) return 'gemini';
+    if (cmd.includes('codex')) return 'codex';
+  } catch {}
+  try {
+    const out = execSync(`tmux capture-pane -t ${name} -p -S -500`, { encoding: 'utf8' });
+    if (/claude --dangerously/m.test(out)) return 'claude';
+    if (/gemini --skip-trust/m.test(out)) return 'gemini';
+    if (/codex --no-alt-screen/m.test(out)) return 'codex';
+  } catch {}
+  return DEFAULT_PROVIDER;
+}
+
 export function listSessions() {
   let raw;
   try {
@@ -30,13 +47,15 @@ export function listSessions() {
     .map(line => {
       const [name, created, activity] = line.replace(/"/g, '').split('|');
       const meta = sessionMeta.get(name) || {};
+      // If metadata was lost on restart, detect provider from tmux scrollback
+      const provider = meta.provider || detectProvider(name);
       return {
         name,
         created: parseInt(created) * 1000,
         activity: parseInt(activity) * 1000,
         task: meta.task || null,
         status: meta.status || 'running',
-        provider: meta.provider || DEFAULT_PROVIDER,
+        provider,
         workdir: meta.workdir || null,
         pendingApproval: meta.pendingApproval || null,
       };
