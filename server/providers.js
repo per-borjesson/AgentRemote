@@ -126,6 +126,8 @@ export const PROVIDERS = {
     approvalPatterns: [
       /Would you like to (?:make the following edits|run the following command)/i,
       /Press enter to confirm or esc to cancel/i,
+      /Do you trust the contents of this directory/i,
+      /Press enter to continue/i,
       /Yes, proceed/i,
       /\[\s*y\/n\s*\]/i,
       /approve\?/i,
