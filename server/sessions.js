@@ -82,6 +82,25 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
   if (provider === 'claude') {
     setTimeout(() => sendKeys(name, '/effort normal', true), 5000);
   }
+  // Codex may show an update prompt on startup; auto-skip it — running the update
+  // causes Codex to exit immediately, breaking the session.
+  if (provider === 'codex') {
+    let checks = 0;
+    const handle = setInterval(() => {
+      try {
+        const out = captureOutput(name, 15);
+        if (/Update available/i.test(out) && /Press enter to continue/i.test(out)) {
+          // Cursor starts on "Update now" (option 1); Down twice reaches "Skip until next version"
+          execSync(`tmux send-keys -t ${name} Down`, { encoding: 'utf8' });
+          execSync(`tmux send-keys -t ${name} Down`, { encoding: 'utf8' });
+          setTimeout(() => execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' }), 100);
+          clearInterval(handle);
+          return;
+        }
+      } catch {}
+      if (++checks >= 10) clearInterval(handle);
+    }, 2000);
+  }
   return getSession(name);
 }
 
