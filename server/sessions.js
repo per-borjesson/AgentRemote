@@ -84,6 +84,8 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
   }
   // Codex may show an update prompt on startup; auto-skip it — running the update
   // causes Codex to exit immediately, breaking the session.
+  // Codex also shows a directory trust prompt on startup; auto-accept it — the
+  // session directory is always freshly created by the server.
   if (provider === 'codex') {
     let checks = 0;
     const handle = setInterval(() => {
@@ -96,6 +98,13 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
           setTimeout(() => execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' }), 100);
           clearInterval(handle);
           return;
+        }
+        if (/Do you trust the contents of this directory/i.test(out)) {
+          // Cursor starts on "Yes, continue" (option 1); Enter accepts it
+          setTimeout(() => execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' }), 100);
+          clearInterval(handle);
+          return;
+        }
         }
       } catch {}
       if (++checks >= 10) clearInterval(handle);
