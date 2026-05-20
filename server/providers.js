@@ -37,12 +37,12 @@ function extractCodexResponses(output) {
 
 // ── Claude CLI ────────────────────────────────────────────────────────────
 // Claude CLI uses ● as a response marker (similar to Codex's •).
-// Blocks continue until the next ❯ prompt, ✻ timing line, or ─── separator.
+// Blocks continue until the next ❯ prompt, ✻/✽/✢/✶ timing line, or ─── separator.
 // Tool-call blocks (● Update(...), ● Bash(...) etc.) are skipped — only
 // prose responses are forwarded to Telegram.
 
-// Matches tool-call ● lines: "● ToolName(..." or "● ToolName·..."
-const CLAUDE_TOOL_CALL = /^\s*●\s+[A-Z][a-zA-Z]+[·(]/;
+// Matches tool-call ● lines: "● ToolName(..." or "● ToolName·..." or "● Calling/Called ..."
+const CLAUDE_TOOL_CALL = /^\s*●\s+(?:[A-Z][a-zA-Z]+[·(]|Call(?:ing|ed)\s)/;
 // Matches the feedback prompt Claude occasionally shows
 const CLAUDE_FEEDBACK  = /How is Claude doing this session/;
 
@@ -63,7 +63,7 @@ function extractClaudeResponses(output) {
     const isResponse = /^\s*●\s/.test(line);
     const isPrompt   = /^\s*❯/.test(line);
     const isSep      = /^─{5,}/.test(line);
-    const isTiming   = /^\s*✻/.test(line);
+    const isTiming   = /^\s*[✻✽✢✶✸]/.test(line);
     const isEmpty    = !line.trim();
 
     if (isResponse) {
@@ -169,11 +169,14 @@ export const PROVIDERS = {
       /Claude Code v[\d.]+/,        // version header
       /(?:Sonnet|Opus|Haiku).*·/,    // model status line
       /▐▛|▝▜|▘▘/,                   // logo box-drawing
-      /✻\s+\w/,                     // timing/thinking indicator
+      /[✻✽✢✶✸]/,                    // timing/thinking indicators (all spinner variants)
       /⏵⏵ bypass permissions/,      // status bar
       /^─{5,}/,                     // separators
       /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,     // spinners
       /\b(low|medium|high)\s*·\s*\/effort/,  // effort indicator
+      /^\s*Call(?:ing|ed)\s/,        // tool call progress sub-lines ("  Calling HubSpot…")
+      /Smooshing/,                   // thinking display text
+      /^\s*⎿/,                      // tip/sub-item prefix
     ],
   },
 
