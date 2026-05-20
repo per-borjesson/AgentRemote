@@ -121,7 +121,7 @@ export const PROVIDERS = {
   codex: {
     label: 'Codex',
     icon: '⚡',
-    launch: (task) => task ? `codex --no-alt-screen -a untrusted "${esc(task)}"` : `codex --no-alt-screen -a untrusted`,
+    launch: (task) => task ? `codex --no-alt-screen -a full-auto "${esc(task)}"` : `codex --no-alt-screen -a full-auto`,
     extractResponses: extractCodexResponses,
     approvalPatterns: [
       /Would you like to (?:make the following edits|run the following command)/i,
