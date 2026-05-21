@@ -303,7 +303,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
   bot.onText(/^\/help$/, guard(async (msg) => {
     if (!isAuthorized(msg)) return;
     const providerList = Object.values(PROVIDERS).map(p => `${p.icon} ${p.label}`).join(', ');
-    const text = [
+    await bot.sendMessage(chatId, [
       '<b>AgentRemote</b>',
       '',
       '<code>/list</code> — browse sessions',
@@ -317,9 +317,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       '<code>/disconnect</code> — exit connect mode',
       '',
       `<i>Providers: ${providerList}</i>`,
-    ].join('\n');
-    console.log('[telegram] /help lines:', text.split('\n').length, '| has /load:', text.includes('/load'));
-    await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
+    ].join('\n'), { parse_mode: 'HTML' });
   }));
 
   // Inline buttons
