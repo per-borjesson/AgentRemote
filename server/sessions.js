@@ -105,7 +105,6 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
           clearInterval(handle);
           return;
         }
-        }
       } catch {}
       if (++checks >= 10) clearInterval(handle);
     }, 2000);
