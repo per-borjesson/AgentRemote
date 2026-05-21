@@ -304,20 +304,20 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     if (!isAuthorized(msg)) return;
     const providerList = Object.values(PROVIDERS).map(p => `${p.icon} ${p.label}`).join(', ');
     await bot.sendMessage(chatId, [
-      '*AgentRemote*',
+      '<b>AgentRemote</b>',
       '',
-      '`/list` — browse sessions',
-      '`/new` — start a session (provider picker)',
-      '`/new name` — start a Codex session',
-      '`/new claude name` — start a Claude session',
-      '`/load` — resume session in existing workspace (picker)',
-      '`/output [name]` — get latest output',
-      '`/send name | text` — send input',
-      '`/kill [name]` — kill a session',
-      '`/disconnect` — exit connect mode',
+      '<code>/list</code> — browse sessions',
+      '<code>/new</code> — start a session (provider picker)',
+      '<code>/new name</code> — start a Codex session',
+      '<code>/new claude name</code> — start a Claude session',
+      '<code>/load</code> — resume session in existing workspace (picker)',
+      '<code>/output [name]</code> — get latest output',
+      '<code>/send name | text</code> — send input',
+      '<code>/kill [name]</code> — kill a session',
+      '<code>/disconnect</code> — exit connect mode',
       '',
-      `_Providers: ${providerList}_`,
-    ].join('\n'), { parse_mode: 'Markdown' });
+      `<i>Providers: ${providerList}</i>`,
+    ].join('\n'), { parse_mode: 'HTML' });
   }));
 
   // Inline buttons
