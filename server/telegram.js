@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import TelegramBot from 'node-telegram-bot-api';
 import { respondToApproval, listSessions, createSession, killSession, captureOutput, sendKeys } from './sessions.js';
@@ -75,6 +75,32 @@ const pendingNew = {
   messageId: null,
 };
 
+// State for the /load workspace-picker flow
+const pendingLoad = {
+  workdir: null,
+  messageId: null,
+  waitingForPath: false,
+};
+
+function buildLoadTask(workdir) {
+  const contextFile = ['CLAUDE.md', 'README.md'].find(f => existsSync(join(workdir, f)));
+  let task = `You are resuming work in ${workdir}.`;
+  task += contextFile
+    ? ` Start by reading ${contextFile} for project context, then wait for instructions.`
+    : ` Start by briefly reviewing the directory structure, then wait for instructions.`;
+  return { task, contextFile };
+}
+
+function listAgentSubdirs() {
+  const agentsDir = join(process.env.HOME, 'agents');
+  if (!existsSync(agentsDir)) return [];
+  try {
+    return readdirSync(agentsDir)
+      .filter(name => { try { return statSync(join(agentsDir, name)).isDirectory(); } catch { return false; } })
+      .sort();
+  } catch { return []; }
+}
+
 export function initTelegram(token, targetChatId, onBroadcast) {
   chatId = targetChatId;
   broadcastFn = onBroadcast;
@@ -101,6 +127,30 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     if (!isAuthorized(msg)) return;
     if (!msg.text) return;
     if (msg.text.startsWith('/')) return;
+
+    // Pending /load: user is supplying a custom path
+    if (pendingLoad.waitingForPath) {
+      const workdir = msg.text.trim();
+      pendingLoad.waitingForPath = false;
+      if (!existsSync(workdir)) {
+        await bot.editMessageText(`❌ Not found: \`${workdir}\``,
+          { chat_id: chatId, message_id: pendingLoad.messageId, parse_mode: 'Markdown' }
+        ).catch(() => {});
+        pendingLoad.messageId = null;
+        return;
+      }
+      pendingLoad.workdir = workdir;
+      await bot.editMessageText(
+        `📁 \`${workdir}\`\n\nChoose AI provider:`,
+        {
+          chat_id: chatId, message_id: pendingLoad.messageId, parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [Object.entries(PROVIDERS).map(([key, p]) => ({
+            text: `${p.icon} ${p.label}`, callback_data: `load-prov:${key}`,
+          }))] },
+        }
+      ).catch(() => {});
+      return;
+    }
 
     // Pending /new: user is supplying just a session name
     if (pendingNew.provider) {
@@ -201,40 +251,38 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     await bot.sendMessage(chatId, `✉️ Sent to \`${name}\``, { parse_mode: 'Markdown' });
   }));
 
-  // /load [provider] name /path/to/dir
+  // /load — no args → workspace picker; with args → /load [provider] name /path
   bot.onText(/^\/load(.*)$/, guard(async (msg, match) => {
     if (!isAuthorized(msg)) return;
     const rest = match[1].trim();
-    if (!rest) return bot.sendMessage(chatId,
-      'Usage: `/load name /path` or `/load claude name /path`',
-      { parse_mode: 'Markdown' });
 
+    if (!rest) {
+      const agentsDir = join(process.env.HOME, 'agents');
+      const subdirs = listAgentSubdirs();
+      const keyboard = [
+        ...subdirs.map(name => [{ text: `📁 ${name}`, callback_data: `load-dir:${join(agentsDir, name)}` }]),
+        [{ text: '✏️ Enter path…', callback_data: 'load-custom' }],
+      ];
+      const sent = await bot.sendMessage(chatId, 'Choose a workspace:', {
+        reply_markup: { inline_keyboard: keyboard },
+      });
+      pendingLoad.messageId = sent.message_id;
+      return;
+    }
+
+    // Typed form: /load [provider] name /path
     const words = rest.split(/\s+/);
     let provider = DEFAULT_PROVIDER;
     let remainder = rest;
-    if (PROVIDERS[words[0]]) {
-      provider = words[0];
-      remainder = words.slice(1).join(' ');
-    }
-
+    if (PROVIDERS[words[0]]) { provider = words[0]; remainder = words.slice(1).join(' '); }
     const m = remainder.match(/^(.+?)\s+(\/\S+)$/);
     if (!m) return bot.sendMessage(chatId,
-      'Usage: `/load name /path` or `/load claude name /path`',
-      { parse_mode: 'Markdown' });
-
+      'Usage: `/load name /path` or `/load claude name /path`', { parse_mode: 'Markdown' });
     const name = m[1].trim().replace(/\s+/g, '-');
     const workdir = m[2].trim();
-
     if (!existsSync(workdir)) return bot.sendMessage(chatId,
-      `❌ Directory not found: \`${workdir}\``,
-      { parse_mode: 'Markdown' });
-
-    const contextFile = ['CLAUDE.md', 'README.md'].find(f => existsSync(join(workdir, f)));
-    let task = `You are resuming work in ${workdir}.`;
-    task += contextFile
-      ? ` Start by reading ${contextFile} for project context, then wait for instructions.`
-      : ` Start by briefly reviewing the directory structure, then wait for instructions.`;
-
+      `❌ Directory not found: \`${workdir}\``, { parse_mode: 'Markdown' });
+    const { task, contextFile } = buildLoadTask(workdir);
     const prov = getProvider(provider);
     createSession(name, task, provider, workdir);
     broadcastFn({ type: 'session_created', session: { name, provider } });
@@ -262,7 +310,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       '`/new` — start a session (provider picker)',
       '`/new name` — start a Codex session',
       '`/new claude name` — start a Claude session',
-      '`/load name /path` — resume session in existing directory',
+      '`/load` — resume session in existing workspace (picker)',
       '`/output [name]` — get latest output',
       '`/send name | text` — send input',
       '`/kill [name]` — kill a session',
@@ -280,6 +328,55 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     const colonIdx = query.data.indexOf(':');
     const action = colonIdx >= 0 ? query.data.slice(0, colonIdx) : query.data;
     const payload = colonIdx >= 0 ? query.data.slice(colonIdx + 1) : '';
+
+    if (action === 'load-dir') {
+      const workdir = payload;
+      if (!existsSync(workdir)) {
+        await bot.editMessageText(`❌ Not found: \`${workdir}\``,
+          { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'Markdown' }
+        ).catch(() => {});
+        return;
+      }
+      pendingLoad.workdir = workdir;
+      pendingLoad.messageId = query.message.message_id;
+      await bot.editMessageText(
+        `📁 \`${workdir}\`\n\nChoose AI provider:`,
+        {
+          chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [Object.entries(PROVIDERS).map(([key, p]) => ({
+            text: `${p.icon} ${p.label}`, callback_data: `load-prov:${key}`,
+          }))] },
+        }
+      ).catch(() => {});
+      return;
+    }
+
+    if (action === 'load-custom') {
+      pendingLoad.waitingForPath = true;
+      pendingLoad.messageId = query.message.message_id;
+      await bot.editMessageText('📁 Send a directory path:',
+        { chat_id: query.message.chat.id, message_id: query.message.message_id }
+      ).catch(() => {});
+      return;
+    }
+
+    if (action === 'load-prov') {
+      const workdir = pendingLoad.workdir;
+      if (!workdir) return;
+      pendingLoad.workdir = null;
+      const provider = payload;
+      const name = workdir.split('/').pop().replace(/\s+/g, '-');
+      const { task, contextFile } = buildLoadTask(workdir);
+      const prov = getProvider(provider);
+      createSession(name, task, provider, workdir);
+      broadcastFn({ type: 'session_created', session: { name, provider } });
+      await bot.editMessageText(
+        `${prov.icon} *${prov.label}* · \`${name}\` loading \`${workdir}\`${contextFile ? ` _(${contextFile})_` : ''}…`,
+        { chat_id: query.message.chat.id, message_id: query.message.message_id, parse_mode: 'Markdown' }
+      ).catch(() => {});
+      setTimeout(() => startConnect(name).catch(() => {}), 2000);
+      return;
+    }
 
     if (action === 'new-provider') {
       const prov = getProvider(payload);
@@ -353,7 +450,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
   bot.setMyCommands([
     { command: 'list',       description: 'Browse active sessions' },
     { command: 'new',        description: 'Start a session: /new name or pick provider' },
-    { command: 'load',       description: 'Resume in existing dir: /load name /path' },
+    { command: 'load',       description: 'Resume in existing workspace (picker)' },
     { command: 'output',     description: 'Get output: /output name' },
     { command: 'send',       description: 'Send input: /send name | text' },
     { command: 'kill',       description: 'Kill a session: /kill name' },
