@@ -1,4 +1,6 @@
 import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import TelegramBot from 'node-telegram-bot-api';
 import { respondToApproval, listSessions, createSession, killSession, captureOutput, sendKeys } from './sessions.js';
 import { PROVIDERS, getProvider, DEFAULT_PROVIDER } from './providers.js';
@@ -199,6 +201,49 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     await bot.sendMessage(chatId, `✉️ Sent to \`${name}\``, { parse_mode: 'Markdown' });
   }));
 
+  // /load [provider] name /path/to/dir
+  bot.onText(/^\/load(.*)$/, guard(async (msg, match) => {
+    if (!isAuthorized(msg)) return;
+    const rest = match[1].trim();
+    if (!rest) return bot.sendMessage(chatId,
+      'Usage: `/load name /path` or `/load claude name /path`',
+      { parse_mode: 'Markdown' });
+
+    const words = rest.split(/\s+/);
+    let provider = DEFAULT_PROVIDER;
+    let remainder = rest;
+    if (PROVIDERS[words[0]]) {
+      provider = words[0];
+      remainder = words.slice(1).join(' ');
+    }
+
+    const m = remainder.match(/^(.+?)\s+(\/\S+)$/);
+    if (!m) return bot.sendMessage(chatId,
+      'Usage: `/load name /path` or `/load claude name /path`',
+      { parse_mode: 'Markdown' });
+
+    const name = m[1].trim().replace(/\s+/g, '-');
+    const workdir = m[2].trim();
+
+    if (!existsSync(workdir)) return bot.sendMessage(chatId,
+      `❌ Directory not found: \`${workdir}\``,
+      { parse_mode: 'Markdown' });
+
+    const contextFile = ['CLAUDE.md', 'README.md'].find(f => existsSync(join(workdir, f)));
+    let task = `You are resuming work in ${workdir}.`;
+    task += contextFile
+      ? ` Start by reading ${contextFile} for project context, then wait for instructions.`
+      : ` Start by briefly reviewing the directory structure, then wait for instructions.`;
+
+    const prov = getProvider(provider);
+    createSession(name, task, provider, workdir);
+    broadcastFn({ type: 'session_created', session: { name, provider } });
+    await bot.sendMessage(chatId,
+      `${prov.icon} *${prov.label}* · \`${name}\` loading \`${workdir}\`${contextFile ? ` _(${contextFile})_` : ''}…`,
+      { parse_mode: 'Markdown' });
+    setTimeout(() => startConnect(name).catch(() => {}), 2000);
+  }));
+
   // /disconnect
   bot.onText(/^\/disconnect$/, guard(async (msg) => {
     if (!isAuthorized(msg)) return;
@@ -217,6 +262,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
       '`/new` — start a session (provider picker)',
       '`/new name` — start a Codex session',
       '`/new claude name` — start a Claude session',
+      '`/load name /path` — resume session in existing directory',
       '`/output [name]` — get latest output',
       '`/send name | text` — send input',
       '`/kill [name]` — kill a session',
@@ -307,6 +353,7 @@ export function initTelegram(token, targetChatId, onBroadcast) {
   bot.setMyCommands([
     { command: 'list',       description: 'Browse active sessions' },
     { command: 'new',        description: 'Start a session: /new name or pick provider' },
+    { command: 'load',       description: 'Resume in existing dir: /load name /path' },
     { command: 'output',     description: 'Get output: /output name' },
     { command: 'send',       description: 'Send input: /send name | text' },
     { command: 'kill',       description: 'Kill a session: /kill name' },
