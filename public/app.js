@@ -189,12 +189,23 @@
   }
 
   // --- Kill session ---
-  document.getElementById('kill-btn').addEventListener('click', async () => {
-    if (!confirm(`Kill session "${currentSession}"?`)) return;
+  const killSheet = document.getElementById('kill-sheet');
+  document.getElementById('kill-btn').addEventListener('click', () => {
+    document.getElementById('kill-sheet-name').textContent = `"${currentSession}" will be destroyed and cannot be recovered.`;
+    killSheet.classList.remove('hidden');
+  });
+  document.getElementById('kill-cancel-btn').addEventListener('click', () => {
+    killSheet.classList.add('hidden');
+  });
+  document.getElementById('kill-confirm-btn').addEventListener('click', async () => {
+    killSheet.classList.add('hidden');
     await api('DELETE', `/api/sessions/${currentSession}`);
     currentSession = null;
     showScreen('main');
     refreshSessions();
+  });
+  killSheet.addEventListener('click', (e) => {
+    if (e.target === killSheet) killSheet.classList.add('hidden');
   });
 
   // --- Back ---

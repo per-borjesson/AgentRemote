@@ -42,7 +42,7 @@
           <h1 id="session-title">Session</h1>
           <span id="session-workdir" class="workdir"></span>
         </div>
-        <button id="kill-btn" class="icon-btn danger" title="Kill session">✕</button>
+        <button id="kill-btn" class="icon-btn" title="More options">···</button>
       </header>
 
       <div id="approval-banner" class="approval-banner hidden">
@@ -78,6 +78,15 @@
           <button id="ns-create" class="primary">Start</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div id="kill-sheet" class="sheet hidden">
+    <div class="sheet-box">
+      <p class="sheet-title">Kill session?</p>
+      <p id="kill-sheet-name" class="sheet-msg"></p>
+      <button id="kill-confirm-btn" class="sheet-danger">Kill session</button>
+      <button id="kill-cancel-btn" class="sheet-cancel">Cancel</button>
     </div>
   </div>
 
