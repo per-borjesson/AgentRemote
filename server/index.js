@@ -15,7 +15,7 @@ import { getProvider } from './providers.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
-const VERSION = '20260523-2';
+const VERSION = '20260523-3';
 
 if (!AUTH_TOKEN) {
   console.error('AUTH_TOKEN not set in .env');
@@ -53,9 +53,8 @@ app.post('/api/sessions', (req, res) => {
 
 app.get('/api/sessions/:name/output', (req, res) => {
   const lines = parseInt(req.query.lines) || 100;
-  const session = getSession(req.params.name);
   const output = captureOutput(req.params.name, lines);
-  const responses = getProvider(session?.provider).extractResponses(output);
+  const responses = storedResponses.get(req.params.name) || [];
   res.json({ output, responses });
 });
 
@@ -74,6 +73,7 @@ app.post('/api/sessions/:name/approve', (req, res) => {
 
 app.delete('/api/sessions/:name', (req, res) => {
   killSession(req.params.name);
+  storedResponses.delete(req.params.name);
   broadcast({ type: 'session_killed', name: req.params.name });
   res.json({ ok: true });
 });
@@ -115,13 +115,29 @@ wss.on('connection', (ws, req) => {
 
 // Poll sessions for output updates and approval prompts
 const knownApprovals = new Set();
+const storedResponses = new Map(); // session name → string[] accumulated history
+
+function mergeResponses(name, incoming) {
+  const stored = storedResponses.get(name) || [];
+  for (const resp of incoming) {
+    const last = stored.length > 0 ? stored[stored.length - 1] : null;
+    if (last && resp.startsWith(last.slice(0, 40)) && resp !== last) {
+      stored[stored.length - 1] = resp; // response grew, update in place
+    } else if (!stored.includes(resp)) {
+      stored.push(resp);
+    }
+  }
+  storedResponses.set(name, stored);
+  return stored;
+}
 
 setInterval(() => {
   const sessions = listSessions();
   for (const session of sessions) {
     // Stream output to subscribed clients
     const output = captureOutput(session.name, 50);
-    const responses = getProvider(session.provider).extractResponses(output);
+    const incoming = getProvider(session.provider).extractResponses(output);
+    const responses = mergeResponses(session.name, incoming);
     for (const client of clients) {
       if (client.readyState === 1 && client._watchSession === session.name) {
         client.send(JSON.stringify({ type: 'output', session: session.name, output, responses }));
