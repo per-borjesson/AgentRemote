@@ -1,10 +1,10 @@
 {
-  "name": "Codex Mobile",
-  "short_name": "Codex",
+  "name": "AgentRemote",
+  "short_name": "AgentRemote",
   "start_url": "/",
-  "display": "standalone",
-  "background_color": "#0d1117",
-  "theme_color": "#0d1117",
+  "display": "fullscreen",
+  "background_color": "#1a1918",
+  "theme_color": "#1a1918",
   "icons": [
     {
       "src": "icon-192.png",
