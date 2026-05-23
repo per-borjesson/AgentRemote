@@ -281,4 +281,20 @@
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
+
+  let installPrompt = null;
+  const installBtn = document.getElementById('install-btn');
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    installPrompt = e;
+    installBtn.classList.remove('hidden');
+  });
+  installBtn.addEventListener('click', async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') installBtn.classList.add('hidden');
+    installPrompt = null;
+  });
+  window.addEventListener('appinstalled', () => installBtn.classList.add('hidden'));
 })();
