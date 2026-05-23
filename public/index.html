@@ -43,6 +43,7 @@
           <h1 id="session-title">Session</h1>
           <span id="session-workdir" class="workdir"></span>
         </div>
+        <button id="view-toggle-btn" class="icon-btn" title="Raw terminal">⌨</button>
         <button id="kill-btn" class="icon-btn" title="More options">···</button>
       </header>
 
@@ -54,7 +55,10 @@
         </div>
       </div>
 
-      <div id="output-container">
+      <div id="chat-container">
+        <div id="chat-messages"></div>
+      </div>
+      <div id="output-container" class="hidden">
         <pre id="output"></pre>
       </div>
 
