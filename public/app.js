@@ -152,7 +152,7 @@
       renderSessionList(null); // will refetch
     }
     if (msg.type === 'output' && msg.session === currentSession) {
-      updateChat(msg.output);
+      updateChat(msg.output, msg.responses || []);
     }
     if (msg.type === 'approval_needed' && msg.session === currentSession) {
       showApprovalBanner(msg.prompt);
@@ -239,13 +239,10 @@
 
   async function fetchOutput(name) {
     const res = await api('GET', `/api/sessions/${name}/output?lines=500`);
-    if (res) updateChat(res.output);
+    if (res) updateChat(res.output, res.responses || []);
   }
 
-  function updateChat(output) {
-    const session = _sessions.find(s => s.name === currentSession);
-    const provider = session?.provider || 'codex';
-    const responses = extractResponses(output, provider);
+  function updateChat(output, responses) {
 
     let changed = false;
     for (const resp of responses) {

@@ -10,6 +10,7 @@ import {
   setApprovalPending, respondToApproval, setSessionStatus,
 } from './sessions.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
+import { getProvider } from './providers.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -51,8 +52,10 @@ app.post('/api/sessions', (req, res) => {
 
 app.get('/api/sessions/:name/output', (req, res) => {
   const lines = parseInt(req.query.lines) || 100;
+  const session = getSession(req.params.name);
   const output = captureOutput(req.params.name, lines);
-  res.json({ output });
+  const responses = getProvider(session?.provider).extractResponses(output);
+  res.json({ output, responses });
 });
 
 app.post('/api/sessions/:name/input', (req, res) => {
@@ -117,9 +120,10 @@ setInterval(() => {
   for (const session of sessions) {
     // Stream output to subscribed clients
     const output = captureOutput(session.name, 50);
+    const responses = getProvider(session.provider).extractResponses(output);
     for (const client of clients) {
       if (client.readyState === 1 && client._watchSession === session.name) {
-        client.send(JSON.stringify({ type: 'output', session: session.name, output }));
+        client.send(JSON.stringify({ type: 'output', session: session.name, output, responses }));
       }
     }
 
