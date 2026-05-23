@@ -38,7 +38,7 @@ app.get('/api/sessions', (req, res) => {
 
 app.post('/api/sessions', (req, res) => {
   const { name, task, provider, workdir } = req.body;
-  if (!name || !task) return res.status(400).json({ error: 'name and task required' });
+  if (!name) return res.status(400).json({ error: 'name required' });
   try {
     const session = createSession(name, task, provider, workdir);
     broadcast({ type: 'session_created', session });

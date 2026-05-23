@@ -238,7 +238,7 @@
   }
 
   async function fetchOutput(name) {
-    const res = await api('GET', `/api/sessions/${name}/output?lines=200`);
+    const res = await api('GET', `/api/sessions/${name}/output?lines=500`);
     if (res) updateChat(res.output);
   }
 
