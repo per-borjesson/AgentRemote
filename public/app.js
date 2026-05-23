@@ -3,98 +3,6 @@
   let token = localStorage.getItem(TOKEN_KEY) || '';
   let ws = null;
   let currentSession = null;
-  let outputPollTimer = null;
-  let chatHistory = []; // { role: 'user'|'ai', text, id }
-  let seenAiTexts = new Set();
-  let lastAiId = null;
-  let showRaw = false;
-
-  // --- Response extraction (mirrors providers.js logic) ---
-  function extractResponses(output, provider) {
-    const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
-    if (provider === 'claude') return extractClaude(clean);
-    if (provider === 'gemini') return extractGemini(clean);
-    return extractCodex(clean);
-  }
-
-  function extractClaude(clean) {
-    const lines = clean.split('\n');
-    const responses = [];
-    let block = null, skipBlock = false, trailing = 0;
-    const flush = () => {
-      if (block !== null && !skipBlock) responses.push(block.trim());
-      block = null; skipBlock = false; trailing = 0;
-    };
-    for (const line of lines) {
-      const isResp = /^\s*●\s/.test(line);
-      const isEnd = /^\s*❯/.test(line) || /^─{5,}/.test(line) || /^\s*[✻✽✢✶✸]/.test(line);
-      const isEmpty = !line.trim();
-      if (isResp) {
-        flush();
-        const text = line.replace(/^\s*●\s*/, '');
-        skipBlock = /^\s*●\s+(?:[A-Z][a-zA-Z]+[·(]|Call(?:ing|ed)\s)/.test(line);
-        block = text; trailing = 0;
-      } else if (block !== null) {
-        if (isEnd) flush();
-        else if (isEmpty) { trailing++; block += '\n'; }
-        else { block += '\n'.repeat(trailing + 1) + line; trailing = 0; }
-      }
-    }
-    flush();
-    return responses.filter(Boolean);
-  }
-
-  function extractCodex(clean) {
-    const lines = clean.split('\n');
-    const responses = [];
-    let block = null, trailing = 0;
-    const flush = () => { if (block) responses.push(block.trim()); block = null; trailing = 0; };
-    for (const line of lines) {
-      const isResp = /^\s*•\s/.test(line) && !/[◦•] Working \(\d+s/.test(line);
-      const isEnd = /^\s*›/.test(line) || /^─{5,}/.test(line);
-      const isEmpty = !line.trim();
-      if (isResp) { flush(); block = line.replace(/^\s*•\s*/, ''); trailing = 0; }
-      else if (block !== null) {
-        if (isEnd) flush();
-        else if (isEmpty) { trailing++; block += '\n'; }
-        else { block += '\n'.repeat(trailing + 1) + line; trailing = 0; }
-      }
-    }
-    flush();
-    return responses.filter(Boolean);
-  }
-
-  function extractGemini(clean) {
-    const lines = clean.split('\n');
-    const responses = [];
-    let block = [], afterInput = false;
-    for (const line of lines) {
-      const isPrompt = /^\s*[>✦]\s/.test(line) || /^\s*[>✦]\s*$/.test(line);
-      if (isPrompt) {
-        if (afterInput && block.length > 0) {
-          const text = block.join('\n').trim();
-          if (text) responses.push(text);
-        }
-        block = [];
-        afterInput = /^\s*[>✦]\s+\S/.test(line);
-      } else if (afterInput) {
-        block.push(line);
-      }
-    }
-    if (afterInput && block.length > 0) {
-      const text = block.join('\n').trim();
-      if (text) responses.push(text);
-    }
-    return responses.filter(Boolean);
-  }
-
-  function formatMessage(text) {
-    let html = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-    html = html.replace(/\n/g, '<br>');
-    return html;
-  }
 
   // --- Screens ---
   const screens = {
@@ -147,16 +55,16 @@
   function handleMessage(msg) {
     if (msg.type === 'connected') {
       const el = document.getElementById('server-version');
-      if (el) el.textContent = `client v20260523-3 · server ${msg.version || '?'}`;
+      if (el) el.textContent = `v20260523-4 · srv ${msg.version || '?'}`;
     }
     if (msg.type === 'connected' || msg.type === 'sessions_update') {
       renderSessionList(msg.sessions);
     }
     if (msg.type === 'session_created') {
-      renderSessionList(null); // will refetch
+      renderSessionList(null);
     }
     if (msg.type === 'output' && msg.session === currentSession) {
-      updateChat(msg.output, msg.responses || []);
+      renderOutput(msg.output);
     }
     if (msg.type === 'approval_needed' && msg.session === currentSession) {
       showApprovalBanner(msg.prompt);
@@ -208,24 +116,11 @@
   // --- Open session ---
   function openSession(name) {
     currentSession = name;
-    showRaw = false;
     const session = _sessions.find(s => s.name === name);
     document.getElementById('session-title').textContent = name;
     const wdEl = document.getElementById('session-workdir');
     if (wdEl) wdEl.textContent = session?.workdir || '';
     document.getElementById('output').textContent = '';
-    // Reset chat state
-    chatHistory = [];
-    seenAiTexts = new Set();
-    lastAiId = null;
-    // Reset view toggle button
-    const vtBtn = document.getElementById('view-toggle-btn');
-    vtBtn.title = 'Raw terminal';
-    vtBtn.textContent = '⌨';
-    // Show chat, hide raw
-    document.getElementById('chat-container').classList.remove('hidden');
-    document.getElementById('output-container').classList.add('hidden');
-    renderChat();
     showScreen('session');
 
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -242,62 +137,16 @@
   }
 
   async function fetchOutput(name) {
-    const res = await api('GET', `/api/sessions/${name}/output?lines=500`);
-    if (res) updateChat(res.output, res.responses || []);
-  }
-
-  function updateChat(output, responses) {
-
-    let changed = false;
-    for (const resp of responses) {
-      const lastAiMsg = chatHistory.find(m => m.id === lastAiId);
-      const isGrowth = lastAiMsg && resp.startsWith(lastAiMsg.text.slice(0, 40));
-      if (isGrowth && lastAiMsg.text !== resp) {
-        lastAiMsg.text = resp;
-        changed = true;
-      } else if (!isGrowth && !seenAiTexts.has(resp)) {
-        seenAiTexts.add(resp);
-        lastAiId = 'a' + Date.now() + Math.random();
-        chatHistory.push({ role: 'ai', text: resp, id: lastAiId });
-        changed = true;
-      }
-    }
-    if (changed) renderChat();
-
-    // Also update raw view if visible
-    if (showRaw) renderOutput(output);
+    const res = await api('GET', `/api/sessions/${name}/output?lines=200`);
+    if (res) renderOutput(res.output);
   }
 
   function renderOutput(text) {
     const el = document.getElementById('output');
-    const atBottom = isScrolledToBottom('output-container');
+    const c = document.getElementById('output-container');
+    const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 40;
     el.textContent = text;
-    if (atBottom) scrollToBottom('output-container');
-  }
-
-  function renderChat() {
-    const container = document.getElementById('chat-messages');
-    const atBottom = isScrolledToBottom('chat-container');
-    if (!chatHistory.length) {
-      container.innerHTML = '<div class="chat-empty">Waiting for response…</div>';
-    } else {
-      container.innerHTML = chatHistory.map(m => `
-        <div class="message ${m.role}">
-          <div class="message-content">${formatMessage(m.text)}</div>
-        </div>
-      `).join('');
-    }
-    if (atBottom) scrollToBottom('chat-container');
-  }
-
-  function isScrolledToBottom(containerId) {
-    const c = document.getElementById(containerId || (showRaw ? 'output-container' : 'chat-container'));
-    return c.scrollHeight - c.scrollTop - c.clientHeight < 40;
-  }
-
-  function scrollToBottom(containerId) {
-    const c = document.getElementById(containerId || (showRaw ? 'output-container' : 'chat-container'));
-    c.scrollTop = c.scrollHeight;
+    if (atBottom) c.scrollTop = c.scrollHeight;
   }
 
   // --- Approval banner ---
@@ -330,8 +179,6 @@
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
-    chatHistory.push({ role: 'user', text, id: 'u' + Date.now() });
-    renderChat();
     await api('POST', `/api/sessions/${currentSession}/input`, { text, enter: true });
   }
 
@@ -353,16 +200,6 @@
   });
   killSheet.addEventListener('click', (e) => {
     if (e.target === killSheet) killSheet.classList.add('hidden');
-  });
-
-  // --- View toggle ---
-  const viewToggleBtn = document.getElementById('view-toggle-btn');
-  viewToggleBtn.addEventListener('click', () => {
-    showRaw = !showRaw;
-    document.getElementById('chat-container').classList.toggle('hidden', showRaw);
-    document.getElementById('output-container').classList.toggle('hidden', !showRaw);
-    viewToggleBtn.title = showRaw ? 'Chat view' : 'Raw terminal';
-    viewToggleBtn.textContent = showRaw ? '💬' : '⌨';
   });
 
   // --- Back ---
@@ -419,7 +256,7 @@
   function providerIcon(p) { return PROVIDER_ICONS[p] || '⚡'; }
 
   function esc(str) {
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   // --- Init ---
