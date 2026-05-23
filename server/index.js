@@ -15,6 +15,7 @@ import { getProvider } from './providers.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
+const VERSION = '20260523-2';
 
 if (!AUTH_TOKEN) {
   console.error('AUTH_TOKEN not set in .env');
@@ -98,7 +99,7 @@ wss.on('connection', (ws, req) => {
   }
 
   clients.add(ws);
-  ws.send(JSON.stringify({ type: 'connected', sessions: listSessions() }));
+  ws.send(JSON.stringify({ type: 'connected', sessions: listSessions(), version: VERSION }));
 
   ws.on('message', (data) => {
     try {

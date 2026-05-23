@@ -145,6 +145,10 @@
   }
 
   function handleMessage(msg) {
+    if (msg.type === 'connected') {
+      const el = document.getElementById('server-version');
+      if (el && msg.version) el.textContent = `v${msg.version}`;
+    }
     if (msg.type === 'connected' || msg.type === 'sessions_update') {
       renderSessionList(msg.sessions);
     }
