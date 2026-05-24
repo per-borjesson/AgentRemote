@@ -135,7 +135,7 @@ setInterval(() => {
   const sessions = listSessions();
   for (const session of sessions) {
     // Stream output to subscribed clients
-    const output = captureOutput(session.name, 50);
+    const output = captureOutput(session.name, 300);
     const incoming = getProvider(session.provider).extractResponses(output);
     const responses = mergeResponses(session.name, incoming);
     for (const client of clients) {

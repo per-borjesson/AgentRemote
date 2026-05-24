@@ -71,7 +71,7 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
   const dir = workdir || `${process.env.HOME}/agents/${name}`;
   execSync(`mkdir -p ${JSON.stringify(dir)}`);
   try {
-    tmux('new-session', '-d', '-s', name, '-c', dir);
+    tmux('new-session', '-d', '-s', name, '-c', dir, '-x', '220', '-y', '50');
   } catch (e) {
     if (!e.message.includes('duplicate session')) throw e;
   }
@@ -80,7 +80,7 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
   sendKeys(name, cmd, true);
   // Claude defaults to high effort — set normal so it doesn't over-think and spam tool-call messages
   if (provider === 'claude') {
-    setTimeout(() => sendKeys(name, '/effort normal', true), 5000);
+    setTimeout(() => sendKeys(name, '/effort normal', true), 15000);
   }
   // Codex may show an update prompt on startup; auto-skip it — running the update
   // causes Codex to exit immediately, breaking the session.

@@ -443,8 +443,16 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     if (action === 'do-disconnect') await disconnect('Disconnected.');
   }));
 
+  let pollingRestartPending = false;
   bot.on('polling_error', (err) => {
     console.error('[telegram] polling error:', err.message);
+    if (err.code === 'EFATAL' && !pollingRestartPending) {
+      pollingRestartPending = true;
+      setTimeout(() => {
+        pollingRestartPending = false;
+        bot.startPolling().catch(e => console.error('[telegram] polling restart failed:', e.message));
+      }, 5000);
+    }
   });
 
   bot.setMyCommands([
@@ -527,21 +535,24 @@ async function startConnect(name) {
           text.startsWith(connectState.lastResponseText) &&
           text !== connectState.lastResponseText
         ) {
+          // Growing response — edit in place while it fits, switch to new parts once it overflows
           connectState.sentResponses.delete(connectState.lastResponseText);
           connectState.sentResponses.add(text);
           connectState.lastResponseText = text;
-          await bot.editMessageText(text, {
-            chat_id: chatId,
-            message_id: connectState.lastResponseMsgId,
-          }).catch(() => {});
+          if (text.length <= 4000) {
+            await bot.editMessageText(text, {
+              chat_id: chatId,
+              message_id: connectState.lastResponseMsgId,
+            }).catch(() => {});
+          } else {
+            const lastSent = await sendParts(splitTg(text));
+            if (lastSent) connectState.lastResponseMsgId = lastSent.message_id;
+          }
         } else {
           connectState.sentResponses.add(text);
-          const sent = await bot.sendMessage(chatId, text).catch(e => {
-            console.error('[poll] send error:', e.message);
-            return null;
-          });
-          if (sent) {
-            connectState.lastResponseMsgId = sent.message_id;
+          const lastSent = await sendParts(splitTg(text));
+          if (lastSent) {
+            connectState.lastResponseMsgId = lastSent.message_id;
             connectState.lastResponseText = text;
           }
         }
@@ -717,6 +728,33 @@ export async function sendApprovalRequest(sessionName, promptText) {
 export async function sendNotification(text) {
   if (!bot || !chatId) return;
   await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+}
+
+function splitTg(text, max = 4000) {
+  if (text.length <= max) return [text];
+  const parts = [];
+  let rest = text;
+  while (rest.length > max) {
+    let cut = rest.lastIndexOf('\n\n', max);
+    if (cut < max / 2) cut = rest.lastIndexOf('\n', max);
+    if (cut < max / 2) cut = max;
+    parts.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
+  }
+  if (rest) parts.push(rest);
+  return parts;
+}
+
+async function sendParts(parts) {
+  let lastSent = null;
+  for (let i = 0; i < parts.length; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, 600));
+    lastSent = await bot.sendMessage(chatId, parts[i]).catch(e => {
+      console.error('[poll] send error:', e.message);
+      return null;
+    });
+  }
+  return lastSent;
 }
 
 function formatAge(ms) {
