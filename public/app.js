@@ -240,7 +240,7 @@
   const inputEl = document.getElementById('input-text');
   document.getElementById('send-btn').addEventListener('click', sendInput);
   inputEl.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendInput(); }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendInput(); }
   });
   inputEl.addEventListener('input', () => {
     inputEl.style.height = 'auto';
