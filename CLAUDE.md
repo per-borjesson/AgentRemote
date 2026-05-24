@@ -57,13 +57,18 @@ Sessions are tmux windows. Each session defaults to `~/agents/<name>` as its wor
 
 `detectProvider` recovers the provider after a server restart (when `sessionMeta` is wiped). It checks `#{pane_current_command}` first (the actual running process — reliable regardless of session age), then falls back to grepping the last 500 lines of scrollback for the launch command.
 
-Claude sessions automatically receive `/effort normal` 5 seconds after launch to prevent verbose over-thinking.
+Claude sessions automatically receive `/effort normal` 15 seconds after launch (the TUI needs time to initialize before it accepts Enter as a submit).
 
 ### Polling loop (`index.js`)
 
 Every 2 seconds:
-1. Pushes `captureOutput` to WebSocket clients subscribed to a session.
-2. Checks for approval prompts → broadcasts `approval_needed` + sends Telegram inline keyboard.
+1. Calls `extractResponses` on 300 lines of `captureOutput`.
+2. `mergeResponses` accumulates raw response strings (for Telegram).
+3. `mergeConversation` noise-filters each response line-by-line and upserts into the `conversations` Map as `{role:'ai', text}` entries. Growing responses update in place (same prefix → replace).
+4. Pushes `{type:'output', output, conversation}` to subscribed WebSocket clients.
+5. Checks for approval prompts → broadcasts `approval_needed` + sends Telegram inline keyboard.
+
+User messages are added to `conversations` via `addUserMessage` at input time (before the tmux key send). The WebSocket broadcasts `user_input` so other connected clients can track the message. The client merges server conversation with any locally-pending user bubbles to avoid race conditions.
 
 ### Telegram bot (`telegram.js`)
 
@@ -76,6 +81,26 @@ Every 2 seconds:
 ### PWA (`public/`)
 
 Three views: login, session list, session detail. Token in `localStorage`. WebSocket auto-reconnects. New-session modal has provider dropdown and optional workdir field (no task field). Session header shows workdir. Session cards show provider icon (⚡/🟣/✨).
+
+Session detail has two view modes toggled by a ⌨/💬 button:
+- **Chat view** (default) — renders `conversation[]` as bubbles. User bubbles use `esc()` + `white-space:pre-wrap`. AI bubbles use `renderMarkdown()` (fenced code blocks, inline code, bold, paragraph breaks).
+- **Terminal view** — raw `textContent` of the tmux scrollback.
+
+`sendInput()` adds a user bubble optimistically before the API call. On WebSocket `output` messages, pending user entries not yet confirmed by the server are preserved in the merge.
+
+Auto-expanding textarea: `rows=1`, grows to `scrollHeight` on `input` event (max 8rem in CSS). Enter inserts newline; Ctrl+Enter / Send button submits.
+
+### Testing
+
+```bash
+python3 test_owa.py   # Playwright smoke test — requires a running server and active session
+```
+
+Covers: login, session open, chat/terminal toggle, optimistic user bubble, AI response bubble.
+
+### tmux size
+
+New sessions are created at 220×50. The server calls `checkTmuxSizes()` on startup and warns if any existing session is smaller. Add `set -g history-limit 10000` to `~/.tmux.conf` to prevent scrollback truncation.
 
 ### Auth
 
