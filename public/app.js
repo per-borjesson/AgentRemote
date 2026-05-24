@@ -237,9 +237,14 @@
   }
 
   // --- Input bar ---
+  const inputEl = document.getElementById('input-text');
   document.getElementById('send-btn').addEventListener('click', sendInput);
-  document.getElementById('input-text').addEventListener('keydown', e => {
-    if (e.key === 'Enter') sendInput();
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendInput(); }
+  });
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = inputEl.scrollHeight + 'px';
   });
 
   async function sendInput() {
@@ -247,6 +252,7 @@
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
+    input.style.height = 'auto';
 
     // Optimistic: add user bubble immediately
     if (chatMode) {
