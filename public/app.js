@@ -87,7 +87,11 @@
       hideApprovalBanner();
     }
     if (msg.type === 'session_killed') {
-      if (msg.name === currentSession) showScreen('main');
+      if (msg.name === currentSession) {
+        history.replaceState({ screen: 'main' }, '');
+        currentSession = null;
+        showScreen('main');
+      }
       refreshSessions();
     }
   }
@@ -129,6 +133,7 @@
 
   // --- Open session ---
   function openSession(name) {
+    history.pushState({ screen: 'session', name }, '');
     currentSession = name;
     conversation = [];
     const session = _sessions.find(s => s.name === name);
@@ -275,6 +280,7 @@
   document.getElementById('kill-confirm-btn').addEventListener('click', async () => {
     killSheet.classList.add('hidden');
     await api('DELETE', `/api/sessions/${currentSession}`);
+    history.replaceState({ screen: 'main' }, '');
     currentSession = null;
     showScreen('main');
     refreshSessions();
@@ -284,10 +290,14 @@
   });
 
   // --- Back ---
-  document.getElementById('back-btn').addEventListener('click', () => {
-    currentSession = null;
-    showScreen('main');
-    refreshSessions();
+  document.getElementById('back-btn').addEventListener('click', () => history.back());
+
+  window.addEventListener('popstate', (e) => {
+    if (e.state?.screen === 'main' && currentSession) {
+      currentSession = null;
+      showScreen('main');
+      refreshSessions();
+    }
   });
 
   // --- New session modal ---
@@ -342,6 +352,7 @@
 
   // --- Init ---
   function initApp() {
+    history.replaceState({ screen: 'main' }, '');
     showScreen('main');
     refreshSessions();
     connectWS();

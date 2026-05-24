@@ -222,7 +222,7 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   display: flex;
   gap: .5rem;
   padding: .625rem .75rem;
-  padding-bottom: calc(.625rem + var(--safe-bottom));
+  padding-bottom: calc(1.25rem + var(--safe-bottom));
   background: var(--surface);
   border-top: 1px solid var(--border);
   flex-shrink: 0;

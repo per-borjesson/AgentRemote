@@ -75,6 +75,13 @@ def run():
         except:
             print('⚠ no AI response within 30s (session may be idle)')
 
+        # Browser back button returns to session list
+        page.go_back()
+        time.sleep(0.3)
+        assert page.is_visible('#main-screen'), '✗ main screen not shown after browser back'
+        assert not page.is_visible('#session-screen'), '✗ session screen still visible after back'
+        print('✓ browser back navigates to session list')
+
         print('\nAll tests passed.')
         browser.close()
 
