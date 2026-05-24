@@ -173,3 +173,24 @@ export function setSessionStatus(name, status) {
   meta.status = status;
   sessionMeta.set(name, meta);
 }
+
+export function checkTmuxSizes(minWidth = 220, minHeight = 50) {
+  try {
+    const raw = execSync(
+      `tmux list-windows -a -F '#{session_name} #{window_width}x#{window_height}'`,
+      { encoding: 'utf8' }
+    ).trim();
+    if (!raw) return;
+    for (const line of raw.split('\n')) {
+      const m = line.match(/^(\S+)\s+(\d+)x(\d+)$/);
+      if (!m) continue;
+      const [, name, w, h] = m;
+      if (parseInt(w) < minWidth || parseInt(h) < minHeight) {
+        console.warn(
+          `[tmux] session "${name}" is ${w}x${h} — responses may be truncated. ` +
+          `Run: tmux resize-window -t ${name} -x ${minWidth} -y ${minHeight}`
+        );
+      }
+    }
+  } catch {}
+}
