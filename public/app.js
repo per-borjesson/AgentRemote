@@ -58,6 +58,11 @@
     if (msg.type === 'connected') {
       const el = document.getElementById('server-version');
       if (el) el.textContent = `v20260524-1 · srv ${msg.version || '?'}`;
+      // Re-subscribe after reconnect so output resumes without re-entering the session
+      if (currentSession) {
+        ws.send(JSON.stringify({ type: 'subscribe_output', session: currentSession }));
+        fetchOutput(currentSession);
+      }
     }
     if (msg.type === 'connected' || msg.type === 'sessions_update') {
       renderSessionList(msg.sessions);
@@ -363,6 +368,16 @@
   } else {
     showScreen('login');
   }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    if (!ws || ws.readyState === WebSocket.CLOSED) {
+      connectWS();
+    } else if (currentSession) {
+      fetchOutput(currentSession);
+    }
+    if (currentSession === null) refreshSessions();
+  });
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});

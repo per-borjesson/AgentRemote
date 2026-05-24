@@ -90,6 +90,8 @@ Session detail has two view modes toggled by a ⌨/💬 button:
 
 Auto-expanding textarea: `rows=1`, grows to `scrollHeight` on `input` event (max 8rem in CSS). Enter inserts newline; Ctrl+Enter / Send button submits.
 
+On WebSocket `connected` (fires on every reconnect), if a session is open the client immediately re-sends `subscribe_output` and calls `fetchOutput` — so output resumes without the user having to re-enter the session. A `visibilitychange` listener fires when the app returns to foreground: if the WebSocket is closed it reconnects; otherwise it re-fetches the current session output. The session list is also refreshed on foreground if no session is open. No client-side polling is needed.
+
 Navigation uses the History API so the Android back button works within the app. `openSession()` calls `history.pushState({screen:'session', name})`. The `popstate` handler navigates back to the session list. Kill and remote-kill use `history.replaceState({screen:'main'})` + direct navigation (no forward entry left for the killed session). The input bar has extra bottom padding (`1.25rem + safe-area-inset-bottom`) to keep the Send button clear of the Android gesture/button bar.
 
 ### Testing
