@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="/style.css?v=20260523-4">
+  <link rel="stylesheet" href="/style.css?v=20260524-1">
 </head>
 <body>
   <div id="app">
@@ -46,6 +46,7 @@
           <h1 id="session-title">Session</h1>
           <span id="session-workdir" class="workdir"></span>
         </div>
+        <button id="view-toggle-btn" class="icon-btn" title="Toggle terminal view">⌨</button>
         <button id="kill-btn" class="icon-btn" title="More options">···</button>
       </header>
 
@@ -58,7 +59,8 @@
       </div>
 
       <div id="output-container">
-        <pre id="output"></pre>
+        <div id="chat-view"></div>
+        <pre id="output" class="hidden"></pre>
       </div>
 
       <div id="input-bar">
@@ -94,6 +96,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=20260523-4"></script>
+  <script src="/app.js?v=20260524-1"></script>
 </body>
 </html>

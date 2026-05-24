@@ -3,6 +3,8 @@
   let token = localStorage.getItem(TOKEN_KEY) || '';
   let ws = null;
   let currentSession = null;
+  let chatMode = true;
+  let conversation = [];
 
   // --- Screens ---
   const screens = {
@@ -55,7 +57,7 @@
   function handleMessage(msg) {
     if (msg.type === 'connected') {
       const el = document.getElementById('server-version');
-      if (el) el.textContent = `v20260523-4 · srv ${msg.version || '?'}`;
+      if (el) el.textContent = `v20260524-1 · srv ${msg.version || '?'}`;
     }
     if (msg.type === 'connected' || msg.type === 'sessions_update') {
       renderSessionList(msg.sessions);
@@ -64,7 +66,19 @@
       renderSessionList(null);
     }
     if (msg.type === 'output' && msg.session === currentSession) {
+      if (msg.conversation) {
+        // Merge: server is authoritative for AI entries; preserve any pending
+        // user messages that haven't been persisted on the server yet.
+        const pending = conversation.filter(e =>
+          e.role === 'user' && !msg.conversation.some(s => s.role === 'user' && s.text === e.text)
+        );
+        conversation = [...msg.conversation, ...pending];
+        if (chatMode) renderChat();
+      }
       renderOutput(msg.output);
+    }
+    if (msg.type === 'user_input' && msg.session === currentSession) {
+      // Optimistic bubble already added locally; server broadcast is for other clients
     }
     if (msg.type === 'approval_needed' && msg.session === currentSession) {
       showApprovalBanner(msg.prompt);
@@ -116,12 +130,15 @@
   // --- Open session ---
   function openSession(name) {
     currentSession = name;
+    conversation = [];
     const session = _sessions.find(s => s.name === name);
     document.getElementById('session-title').textContent = name;
     const wdEl = document.getElementById('session-workdir');
     if (wdEl) wdEl.textContent = session?.workdir || '';
+    document.getElementById('chat-view').innerHTML = '';
     document.getElementById('output').textContent = '';
     showScreen('session');
+    setChatMode(true);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'subscribe_output', session: name }));
@@ -137,16 +154,67 @@
   }
 
   async function fetchOutput(name) {
-    const res = await api('GET', `/api/sessions/${name}/output?lines=200`);
-    if (res) renderOutput(res.output);
+    const res = await api('GET', `/api/sessions/${name}/output?lines=300`);
+    if (!res) return;
+    if (res.conversation) {
+      conversation = res.conversation;
+      if (chatMode) renderChat();
+    }
+    renderOutput(res.output);
   }
 
+  // --- Chat view ---
+  function setChatMode(on) {
+    chatMode = on;
+    document.getElementById('chat-view').classList.toggle('hidden', !on);
+    document.getElementById('output').classList.toggle('hidden', on);
+    const btn = document.getElementById('view-toggle-btn');
+    btn.textContent = on ? '⌨' : '💬';
+    btn.title = on ? 'Switch to terminal view' : 'Switch to chat view';
+    if (on) renderChat();
+  }
+
+  document.getElementById('view-toggle-btn').addEventListener('click', () => setChatMode(!chatMode));
+
+  function renderChat() {
+    const el = document.getElementById('chat-view');
+    const c = document.getElementById('output-container');
+    const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
+
+    el.innerHTML = conversation.map(entry => {
+      if (entry.role === 'user') {
+        return `<div class="bubble user"><div class="bubble-text">${esc(entry.text)}</div></div>`;
+      }
+      return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}</div></div>`;
+    }).join('');
+
+    if (atBottom) c.scrollTop = c.scrollHeight;
+  }
+
+  function renderMarkdown(text) {
+    // Split on fenced code blocks, process each part separately
+    const parts = text.split(/(```[\s\S]*?```)/g);
+    const html = parts.map((part, i) => {
+      if (i % 2 === 1) {
+        const inner = part.slice(3, -3).replace(/^[^\n]*\n/, '');
+        return `<pre class="code-block"><code>${esc(inner)}</code></pre>`;
+      }
+      return esc(part)
+        .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n\n+/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+    }).join('');
+    return `<p>${html}</p>`;
+  }
+
+  // --- Terminal view ---
   function renderOutput(text) {
     const el = document.getElementById('output');
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 40;
     el.textContent = text;
-    if (atBottom) c.scrollTop = c.scrollHeight;
+    if (!chatMode && atBottom) c.scrollTop = c.scrollHeight;
   }
 
   // --- Approval banner ---
@@ -179,6 +247,13 @@
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
+
+    // Optimistic: add user bubble immediately
+    if (chatMode) {
+      conversation.push({ role: 'user', text });
+      renderChat();
+    }
+
     await api('POST', `/api/sessions/${currentSession}/input`, { text, enter: true });
   }
 

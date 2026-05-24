@@ -144,6 +144,76 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   word-break: break-all;
 }
 
+/* Chat view */
+#chat-view {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  padding-bottom: .5rem;
+}
+
+.bubble {
+  display: flex;
+  max-width: 85%;
+}
+.bubble.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+.bubble.ai {
+  align-self: flex-start;
+}
+
+.bubble-text {
+  padding: .625rem .9rem;
+  border-radius: 18px;
+  font-size: .9rem;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.bubble.user .bubble-text {
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.bubble.ai .bubble-text {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+
+.bubble.ai .bubble-text p {
+  margin: 0 0 .5rem;
+}
+.bubble.ai .bubble-text p:last-child { margin-bottom: 0; }
+
+.bubble.ai .bubble-text code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: .8em;
+  background: var(--surface-2);
+  padding: .1em .35em;
+  border-radius: 4px;
+}
+
+.bubble.ai .bubble-text .code-block {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .75rem 1rem;
+  margin: .5rem 0;
+  overflow-x: auto;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: .78rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+.bubble.ai .bubble-text .code-block code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
 
 /* Input bar */
 #input-bar {

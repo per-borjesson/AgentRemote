@@ -55,12 +55,14 @@ app.post('/api/sessions', (req, res) => {
 app.get('/api/sessions/:name/output', (req, res) => {
   const lines = parseInt(req.query.lines) || 100;
   const output = captureOutput(req.params.name, lines);
-  const responses = storedResponses.get(req.params.name) || [];
-  res.json({ output, responses });
+  const conversation = conversations.get(req.params.name) || [];
+  res.json({ output, conversation });
 });
 
 app.post('/api/sessions/:name/input', (req, res) => {
   const { text, enter } = req.body;
+  addUserMessage(req.params.name, text);
+  broadcast({ type: 'user_input', session: req.params.name, text: (text || '').trim() });
   sendKeys(req.params.name, text, enter !== false);
   res.json({ ok: true });
 });
@@ -75,6 +77,7 @@ app.post('/api/sessions/:name/approve', (req, res) => {
 app.delete('/api/sessions/:name', (req, res) => {
   killSession(req.params.name);
   storedResponses.delete(req.params.name);
+  conversations.delete(req.params.name);
   broadcast({ type: 'session_killed', name: req.params.name });
   res.json({ ok: true });
 });
@@ -116,14 +119,15 @@ wss.on('connection', (ws, req) => {
 
 // Poll sessions for output updates and approval prompts
 const knownApprovals = new Set();
-const storedResponses = new Map(); // session name → string[] accumulated history
+const storedResponses = new Map(); // session name → string[] (for Telegram)
+const conversations   = new Map(); // session name → {role,text}[] (for UI)
 
 function mergeResponses(name, incoming) {
   const stored = storedResponses.get(name) || [];
   for (const resp of incoming) {
     const last = stored.length > 0 ? stored[stored.length - 1] : null;
     if (last && resp.startsWith(last.slice(0, 40)) && resp !== last) {
-      stored[stored.length - 1] = resp; // response grew, update in place
+      stored[stored.length - 1] = resp;
     } else if (!stored.includes(resp)) {
       stored.push(resp);
     }
@@ -132,22 +136,50 @@ function mergeResponses(name, incoming) {
   return stored;
 }
 
+function mergeConversation(name, incoming, provider) {
+  const conv = conversations.get(name) || [];
+  for (const raw of incoming) {
+    const text = raw.split('\n')
+      .filter(line => !provider.noisePatterns.some(p => p.test(line)))
+      .join('\n').trim();
+    if (!text) continue;
+    const lastAIIdx = conv.reduce((idx, e, i) => e.role === 'ai' ? i : idx, -1);
+    const lastAI = lastAIIdx >= 0 ? conv[lastAIIdx] : null;
+    if (lastAI && text.startsWith(lastAI.text.slice(0, 40)) && text !== lastAI.text) {
+      conv[lastAIIdx] = { role: 'ai', text };
+    } else if (!conv.some(e => e.role === 'ai' && e.text === text)) {
+      conv.push({ role: 'ai', text });
+    }
+  }
+  conversations.set(name, conv);
+  return conv;
+}
+
+function addUserMessage(name, text) {
+  const t = (text || '').trim();
+  if (!t) return;
+  const conv = conversations.get(name) || [];
+  conv.push({ role: 'user', text: t });
+  conversations.set(name, conv);
+}
+
 setInterval(() => {
   const sessions = listSessions();
   for (const session of sessions) {
     // Stream output to subscribed clients
     const output = captureOutput(session.name, 300);
-    const incoming = getProvider(session.provider).extractResponses(output);
-    const responses = mergeResponses(session.name, incoming);
+    const prov = getProvider(session.provider);
+    const incoming = prov.extractResponses(output);
+    mergeResponses(session.name, incoming);
+    const conversation = mergeConversation(session.name, incoming, prov);
     for (const client of clients) {
       if (client.readyState === 1 && client._watchSession === session.name) {
-        client.send(JSON.stringify({ type: 'output', session: session.name, output, responses }));
+        client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation }));
       }
     }
 
     // Check for pending approvals
     if (!session.pendingApproval && checkForApprovalPrompt(session.name)) {
-      const key = `${session.name}:${Date.now()}`;
       if (!knownApprovals.has(session.name)) {
         knownApprovals.add(session.name);
         const promptText = captureOutput(session.name, 20);
