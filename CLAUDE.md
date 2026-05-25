@@ -90,6 +90,14 @@ Session detail has two view modes toggled by a ⌨/💬 button:
 
 Auto-expanding textarea: `rows=1`, grows to `scrollHeight` on `input` event (max 8rem in CSS). Enter inserts newline; Ctrl+Enter / Send button submits.
 
+### Session resume
+
+When Claude exits it prints `claude --resume <uuid>`. The polling loop calls `checkForResume(name)` which scans the last 50 lines for this pattern (via `provider.resumePattern`). On first detection it stores the UUID in `sessionMeta` (`resumeId`), sets status to `done`, and broadcasts `session_resumable`. A `knownResumable` Set prevents repeated broadcasts.
+
+`resumeSession(name)` sends `claude --resume <uuid> --dangerously-skip-permissions` to the tmux shell and clears the stored ID. It's called via `POST /api/sessions/:name/resume`.
+
+The OWA shows a green "Claude session ended / ↺ Resume" banner when `session_resumable` arrives or when opening a session that already has a `resumeId`. Tapping Resume calls the API and hides the banner. Telegram gets a notification when a session becomes resumable.
+
 On WebSocket `connected` (fires on every reconnect), if a session is open the client immediately re-sends `subscribe_output` and calls `fetchOutput` — so output resumes without the user having to re-enter the session. A `visibilitychange` listener fires when the app returns to foreground: if the WebSocket is closed it reconnects; otherwise it re-fetches the current session output. The session list is also refreshed on foreground if no session is open. No client-side polling is needed.
 
 Navigation uses the History API so the Android back button works within the app. `openSession()` calls `history.pushState({screen:'session', name})`. The `popstate` handler navigates back to the session list. Kill and remote-kill use `history.replaceState({screen:'main'})` + direct navigation (no forward entry left for the killed session). The input bar has extra bottom padding (`1.25rem + safe-area-inset-bottom`) to keep the Send button clear of the Android gesture/button bar.

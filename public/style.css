@@ -133,6 +133,31 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
 .approval-actions .approve { background: var(--green); color: #fff; }
 .approval-actions .reject { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
 
+/* Resume banner */
+.resume-banner {
+  background: rgba(78, 158, 114, .1);
+  border-bottom: 1px solid var(--green);
+  padding: .75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  flex-shrink: 0;
+}
+.resume-banner p { font-size: .85rem; color: var(--green); }
+.resume-btn {
+  padding: .4rem .9rem;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--green);
+  color: #fff;
+  font-size: .875rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
 /* Output */
 #output-container { flex: 1; overflow-y: auto; padding: .875rem 1rem; }
 #output {

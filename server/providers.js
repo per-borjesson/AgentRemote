@@ -154,6 +154,7 @@ export const PROVIDERS = {
     // --dangerously-skip-permissions disables interactive permission prompts so
     // the session behaves like Codex's -a untrusted mode (approvals via our UI).
     launch: (task) => task ? `claude --dangerously-skip-permissions "${esc(task)}"` : `claude --dangerously-skip-permissions`,
+    resumePattern: /claude --resume ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/,
     extractResponses: extractClaudeResponses,
     approvalPatterns: [
       /\[Y\/n\]/,

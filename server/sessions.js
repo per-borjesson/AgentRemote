@@ -58,8 +58,37 @@ export function listSessions() {
         provider,
         workdir: meta.workdir || null,
         pendingApproval: meta.pendingApproval || null,
+        resumeId: meta.resumeId || null,
       };
     });
+}
+
+export function checkForResume(name) {
+  const meta = sessionMeta.get(name) || {};
+  if (meta.resumeId) return meta.resumeId;
+  const provider = getProvider(meta.provider || detectProvider(name));
+  if (!provider.resumePattern) return null;
+  const output = captureOutput(name, 50).replace(/\x1b\[[0-9;]*m/g, '');
+  const m = output.match(provider.resumePattern);
+  if (!m) return null;
+  meta.resumeId = m[1];
+  meta.status = 'done';
+  sessionMeta.set(name, meta);
+  return m[1];
+}
+
+export function resumeSession(name) {
+  const meta = sessionMeta.get(name) || {};
+  const { resumeId, provider } = meta;
+  if (!resumeId) return false;
+  const cmd = provider === 'claude'
+    ? `claude --resume ${resumeId} --dangerously-skip-permissions`
+    : `claude --resume ${resumeId}`;
+  meta.resumeId = null;
+  meta.status = 'running';
+  sessionMeta.set(name, meta);
+  sendKeys(name, cmd, true);
+  return true;
 }
 
 export function getSession(name) {

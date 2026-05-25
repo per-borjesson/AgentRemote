@@ -91,6 +91,12 @@
     if (msg.type === 'approval_response' && msg.session === currentSession) {
       hideApprovalBanner();
     }
+    if (msg.type === 'session_resumable' && msg.session === currentSession) {
+      showResumeBanner();
+    }
+    if (msg.type === 'session_resumed' && msg.session === currentSession) {
+      hideResumeBanner();
+    }
     if (msg.type === 'session_killed') {
       if (msg.name === currentSession) {
         history.replaceState({ screen: 'main' }, '');
@@ -160,6 +166,11 @@
       showApprovalBanner(session.pendingApproval.text);
     } else {
       hideApprovalBanner();
+    }
+    if (session?.resumeId) {
+      showResumeBanner();
+    } else {
+      hideResumeBanner();
     }
   }
 
@@ -237,6 +248,18 @@
   function hideApprovalBanner() {
     document.getElementById('approval-banner').classList.add('hidden');
   }
+
+  // --- Resume banner ---
+  function showResumeBanner() {
+    document.getElementById('resume-banner').classList.remove('hidden');
+  }
+  function hideResumeBanner() {
+    document.getElementById('resume-banner').classList.add('hidden');
+  }
+  document.getElementById('resume-btn').addEventListener('click', async () => {
+    hideResumeBanner();
+    await api('POST', `/api/sessions/${currentSession}/resume`);
+  });
 
   document.getElementById('approve-btn').addEventListener('click', () => sendApproval(true));
   document.getElementById('reject-btn').addEventListener('click', () => sendApproval(false));

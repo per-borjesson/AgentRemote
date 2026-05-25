@@ -8,7 +8,7 @@ import {
   listSessions, getSession, createSession, sendKeys,
   captureOutput, killSession, checkForApprovalPrompt,
   setApprovalPending, respondToApproval, setSessionStatus,
-  checkTmuxSizes,
+  checkTmuxSizes, checkForResume, resumeSession,
 } from './sessions.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
@@ -74,10 +74,19 @@ app.post('/api/sessions/:name/approve', (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/sessions/:name/resume', (req, res) => {
+  const ok = resumeSession(req.params.name);
+  if (!ok) return res.status(400).json({ error: 'no resume ID available' });
+  knownResumable.delete(req.params.name);
+  broadcast({ type: 'session_resumed', session: req.params.name });
+  res.json({ ok: true });
+});
+
 app.delete('/api/sessions/:name', (req, res) => {
   killSession(req.params.name);
   storedResponses.delete(req.params.name);
   conversations.delete(req.params.name);
+  knownResumable.delete(req.params.name);
   broadcast({ type: 'session_killed', name: req.params.name });
   res.json({ ok: true });
 });
@@ -119,6 +128,7 @@ wss.on('connection', (ws, req) => {
 
 // Poll sessions for output updates and approval prompts
 const knownApprovals = new Set();
+const knownResumable = new Set();
 const storedResponses = new Map(); // session name → string[] (for Telegram)
 const conversations   = new Map(); // session name → {role,text}[] (for UI)
 
@@ -189,6 +199,16 @@ setInterval(() => {
       }
     } else if (session.pendingApproval === null) {
       knownApprovals.delete(session.name);
+    }
+
+    // Check for Claude exit with resume ID
+    const resumeId = checkForResume(session.name);
+    if (resumeId && !knownResumable.has(session.name)) {
+      knownResumable.add(session.name);
+      broadcast({ type: 'session_resumable', session: session.name, resumeId });
+      sendNotification(`⏸ Session *${session.name}* ended — tap Resume in the app`).catch(() => {});
+    } else if (!resumeId) {
+      knownResumable.delete(session.name);
     }
   }
 
