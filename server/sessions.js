@@ -151,12 +151,13 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
 }
 
 export function sendKeys(name, keys, enter = false) {
-  execSync(`tmux send-keys -t ${name} -l ${JSON.stringify(keys)}`, { encoding: 'utf8' });
+  const lines = keys.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i]) execSync(`tmux send-keys -t ${name} -l ${JSON.stringify(lines[i])}`, { encoding: 'utf8' });
+    if (i < lines.length - 1) execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' });
+  }
   if (enter) {
-    // Small delay lets the TUI register the text before Enter fires
-    setTimeout(() => {
-      execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' });
-    }, 300);
+    setTimeout(() => execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' }), 300);
   }
 }
 
