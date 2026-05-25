@@ -68,6 +68,15 @@ export function checkForResume(name) {
   if (meta.resumeId) return meta.resumeId;
   const provider = getProvider(meta.provider || detectProvider(name));
   if (!provider.resumePattern) return null;
+  // Only resumable when the AI is not currently running — prevents false
+  // positives from old resume messages sitting in the scrollback buffer.
+  try {
+    const cmd = execSync(
+      `tmux display-message -p -t ${name} '#{pane_current_command}'`,
+      { encoding: 'utf8' }
+    ).trim().toLowerCase();
+    if (cmd.includes('claude') || cmd.includes('codex') || cmd.includes('gemini')) return null;
+  } catch { return null; }
   const output = captureOutput(name, 50).replace(/\x1b\[[0-9;]*m/g, '');
   const m = output.match(provider.resumePattern);
   if (!m) return null;

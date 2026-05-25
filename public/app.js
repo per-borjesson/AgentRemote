@@ -5,6 +5,8 @@
   let currentSession = null;
   let chatMode = true;
   let conversation = [];
+  let lastChatKey = '';
+  let lastOutputText = '';
 
   // --- Screens ---
   const screens = {
@@ -147,6 +149,8 @@
     history.pushState({ screen: 'session', name }, '');
     currentSession = name;
     conversation = [];
+    lastChatKey = '';
+    lastOutputText = '';
     const session = _sessions.find(s => s.name === name);
     document.getElementById('session-title').textContent = name;
     const wdEl = document.getElementById('session-workdir');
@@ -198,6 +202,9 @@
   document.getElementById('view-toggle-btn').addEventListener('click', () => setChatMode(!chatMode));
 
   function renderChat() {
+    const key = conversation.map(e => e.role + e.text.length).join(',');
+    if (key === lastChatKey) return;
+    lastChatKey = key;
     const el = document.getElementById('chat-view');
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
@@ -231,6 +238,8 @@
 
   // --- Terminal view ---
   function renderOutput(text) {
+    if (text === lastOutputText) return;
+    lastOutputText = text;
     const el = document.getElementById('output');
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 40;
