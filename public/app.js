@@ -124,13 +124,15 @@
     }
 
     empty.classList.add('hidden');
-    list.innerHTML = _sessions.map(s => `
+    const sorted = [..._sessions].sort((a, b) => b.activity - a.activity);
+    list.innerHTML = sorted.map(s => `
       <div class="session-card" data-name="${s.name}">
         <div class="status-dot ${s.status}"></div>
         <div class="info">
           <div class="name">${esc(s.name)} <span class="provider-badge">${esc(providerIcon(s.provider))}</span></div>
           <div class="task">${esc(s.task || '—')}</div>
         </div>
+        <div class="session-age">${timeAgo(s.activity)}</div>
       </div>
     `).join('');
 
@@ -378,6 +380,16 @@
     } catch {
       return null;
     }
+  }
+
+  function timeAgo(ts) {
+    const sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 60) return 'just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    return `${Math.floor(hr / 24)}d ago`;
   }
 
   const PROVIDER_ICONS = { codex: '⚡', claude: '🟣', gemini: '✨' };
