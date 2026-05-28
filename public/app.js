@@ -212,10 +212,11 @@
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
 
     el.innerHTML = conversation.map(entry => {
+      const ts = entry.ts ? `<span class="bubble-time">${formatMsgTime(entry.ts)}</span>` : '';
       if (entry.role === 'user') {
-        return `<div class="bubble user"><div class="bubble-text">${esc(entry.text)}</div></div>`;
+        return `<div class="bubble user"><div class="bubble-text">${esc(entry.text)}${ts}</div></div>`;
       }
-      return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}</div></div>`;
+      return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}${ts}</div></div>`;
     }).join('');
 
     if (atBottom) c.scrollTop = c.scrollHeight;
@@ -380,6 +381,15 @@
     } catch {
       return null;
     }
+  }
+
+  function formatMsgTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const now = new Date();
+    const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (d.toDateString() === now.toDateString()) return hm;
+    return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + hm;
   }
 
   function timeAgo(ts) {

@@ -211,6 +211,15 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   white-space: normal;
 }
 
+.bubble-time {
+  display: block;
+  font-size: .65rem;
+  opacity: .55;
+  margin-top: .3rem;
+  text-align: right;
+}
+.bubble.ai .bubble-text .bubble-time { text-align: left; }
+
 .bubble.ai .bubble-text p {
   margin: 0 0 .5rem;
 }

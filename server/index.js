@@ -156,9 +156,9 @@ function mergeConversation(name, incoming, provider) {
     const lastAIIdx = conv.reduce((idx, e, i) => e.role === 'ai' ? i : idx, -1);
     const lastAI = lastAIIdx >= 0 ? conv[lastAIIdx] : null;
     if (lastAI && text.startsWith(lastAI.text.slice(0, 40)) && text !== lastAI.text) {
-      conv[lastAIIdx] = { role: 'ai', text };
+      conv[lastAIIdx] = { role: 'ai', text, ts: lastAI.ts || Date.now() };
     } else if (!conv.some(e => e.role === 'ai' && e.text === text)) {
-      conv.push({ role: 'ai', text });
+      conv.push({ role: 'ai', text, ts: Date.now() });
     }
   }
   conversations.set(name, conv);
@@ -169,7 +169,7 @@ function addUserMessage(name, text) {
   const t = (text || '').trim();
   if (!t) return;
   const conv = conversations.get(name) || [];
-  conv.push({ role: 'user', text: t });
+  conv.push({ role: 'user', text: t, ts: Date.now() });
   conversations.set(name, conv);
 }
 
