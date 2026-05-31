@@ -41,8 +41,8 @@ function extractCodexResponses(output) {
 // Tool-call blocks (● Update(...), ● Bash(...) etc.) are skipped — only
 // prose responses are forwarded to Telegram.
 
-// Matches tool-call ● lines: "● ToolName(..." or "● ToolName·..." or "● Calling/Called ..."
-const CLAUDE_TOOL_CALL = /^\s*●\s+(?:[A-Z][a-zA-Z]+[·(]|Call(?:ing|ed)\s)/;
+// Matches tool-call ● lines: old-style "● ToolName(..." and new-style "● Reading 1 file…"
+const CLAUDE_TOOL_CALL = /^\s*●\s+(?:[A-Z][a-zA-Z]+[·(]|Call(?:ing|ed)\s|[A-Z][a-z]+ing \d)/;
 // Matches the feedback prompt Claude occasionally shows
 const CLAUDE_FEEDBACK  = /How is Claude doing this session/;
 
@@ -61,9 +61,11 @@ function extractClaudeResponses(output) {
 
   for (const line of lines) {
     const isResponse = /^\s*●\s/.test(line);
-    const isPrompt   = /^\s*❯/.test(line);
+    // Only unindented ❯ is the user prompt — questionnaire options use indented ❯
+    const isPrompt   = /^❯/.test(line);
     const isSep      = /^─{5,}/.test(line);
-    const isTiming   = /^\s*[✻✽✢✶✸]/.test(line);
+    // Old-style ✻/✽/… spinners and new-style "* Roosting… (4s …)" / "· Roosting… (12s …)"
+    const isTiming   = /^\s*[✻✽✢✶✸]/.test(line) || /^\s*[*·] \w[\w ]*[….]? \(\d+[ms]/.test(line);
     const isEmpty    = !line.trim();
 
     if (isResponse) {
@@ -171,6 +173,7 @@ export const PROVIDERS = {
       /(?:Sonnet|Opus|Haiku).*·/,    // model status line
       /▐▛|▝▜|▘▘/,                   // logo box-drawing
       /[✻✽✢✶✸]/,                    // timing/thinking indicators (all spinner variants)
+      /^\s*[*·] \w[\w ]*[….]? \(\d+[ms]/,  // new-style timing (* Roosting… (4s), · Roosting… (12s))
       /⏵⏵ bypass permissions/,      // status bar
       /^─{5,}/,                     // separators
       /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,     // spinners
@@ -178,6 +181,8 @@ export const PROVIDERS = {
       /^\s*Call(?:ing|ed)\s/,        // tool call progress sub-lines ("  Calling HubSpot…")
       /Smooshing/,                   // thinking display text
       /^\s*⎿/,                      // tip/sub-item prefix
+      /^\s+(?:Read|Ran|Listed|Wrote|Written|Edited|Created|Deleted|Fetched|Searched)\s+\d/, // tool completion summaries
+      /ctrl\+b.*background/,        // background run hint
     ],
   },
 
