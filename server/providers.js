@@ -121,7 +121,7 @@ export const PROVIDERS = {
   codex: {
     label: 'Codex',
     icon: '⚡',
-    launch: (task) => task ? `codex --no-alt-screen -a never "${esc(task)}"` : `codex --no-alt-screen -a never`,
+    launch: (task) => task ? `codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox "${esc(task)}"` : `codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox`,
     extractResponses: extractCodexResponses,
     approvalPatterns: [
       /Would you like to (?:make the following edits|run the following command)/i,
