@@ -349,6 +349,8 @@
   document.getElementById('ns-create').addEventListener('click', createSession);
 
   function openModal() {
+    document.getElementById('ns-name').value = '';
+    document.getElementById('ns-workdir').value = '';
     document.getElementById('new-session-modal').classList.remove('hidden');
     document.getElementById('ns-name').focus();
   }
