@@ -344,12 +344,14 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   color: var(--text);
   font-size: .9rem;
   cursor: pointer;
-  text-align: left;
   font-family: inherit;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: border-color .15s, background .15s;
+  display: flex;
+  align-items: center;
+  line-height: 1;
 }
 .ls-dir-item:hover { border-color: var(--accent); }
 .ls-dir-item.selected { border-color: var(--accent); background: rgba(201,100,66,.12); }
