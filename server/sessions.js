@@ -118,7 +118,7 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
   sendKeys(name, cmd, true);
   // Claude defaults to high effort — set normal so it doesn't over-think and spam tool-call messages
   if (provider === 'claude') {
-    setTimeout(() => sendKeys(name, '/effort low', true), 15000);
+    setTimeout(() => sendKeys(name, '/effort auto', true), 15000);
   }
   // Codex may show an update prompt on startup; auto-skip it — running the update
   // causes Codex to exit immediately, breaking the session.
