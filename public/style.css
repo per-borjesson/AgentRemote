@@ -332,12 +332,12 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
 .ls-dir-list {
   display: flex;
   flex-direction: column;
-  gap: .375rem;
-  max-height: 12rem;
+  gap: .5rem;
+  max-height: 14rem;
   overflow-y: auto;
 }
 .ls-dir-item {
-  padding: .5rem .875rem;
+  padding: .75rem .875rem;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg);
