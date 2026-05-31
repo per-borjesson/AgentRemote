@@ -372,6 +372,73 @@
     }
   }
 
+  // --- Load session modal ---
+  let loadDirs = [];
+  let loadSelectedPath = null;
+
+  document.getElementById('load-session-btn').addEventListener('click', openLoadModal);
+  document.getElementById('ls-cancel').addEventListener('click', closeLoadModal);
+  document.getElementById('ls-load').addEventListener('click', doLoadSession);
+  document.getElementById('load-session-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('load-session-modal')) closeLoadModal();
+  });
+
+  document.getElementById('ls-custom-path').addEventListener('input', () => {
+    loadSelectedPath = null;
+    document.querySelectorAll('.ls-dir-item').forEach(el => el.classList.remove('selected'));
+  });
+
+  async function openLoadModal() {
+    loadSelectedPath = null;
+    document.getElementById('ls-custom-path').value = '';
+    const listEl = document.getElementById('ls-dir-list');
+    listEl.innerHTML = '<span style="color:var(--muted);font-size:.85rem;padding:.25rem .25rem">Loading…</span>';
+    document.getElementById('load-session-modal').classList.remove('hidden');
+
+    const dirs = await api('GET', '/api/agents');
+    loadDirs = dirs || [];
+    if (!loadDirs.length) {
+      listEl.innerHTML = '<span style="color:var(--muted);font-size:.85rem;padding:.25rem .25rem">No workspaces found</span>';
+      return;
+    }
+    listEl.innerHTML = loadDirs.map((d, i) =>
+      `<button class="ls-dir-item" data-idx="${i}">📁 ${esc(d.name)}</button>`
+    ).join('');
+    listEl.querySelectorAll('.ls-dir-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const d = loadDirs[parseInt(btn.dataset.idx)];
+        loadSelectedPath = d.path;
+        document.getElementById('ls-custom-path').value = '';
+        listEl.querySelectorAll('.ls-dir-item').forEach(el => el.classList.remove('selected'));
+        btn.classList.add('selected');
+      });
+    });
+  }
+
+  function closeLoadModal() {
+    document.getElementById('load-session-modal').classList.add('hidden');
+    loadSelectedPath = null;
+  }
+
+  async function doLoadSession() {
+    const customPath = document.getElementById('ls-custom-path').value.trim();
+    const workdir = customPath || loadSelectedPath;
+    if (!workdir) return;
+    const provider = document.getElementById('ls-provider').value;
+    const name = workdir.split('/').pop().replace(/\s+/g, '-');
+    const dir = loadDirs.find(d => d.path === workdir);
+    let task = `You are resuming work in ${workdir}.`;
+    task += dir?.contextFile
+      ? ` Start by reading ${dir.contextFile} for project context, then wait for instructions.`
+      : ` Start by briefly reviewing the directory structure, then wait for instructions.`;
+    closeLoadModal();
+    const res = await api('POST', '/api/sessions', { name, task, provider, workdir });
+    if (res) {
+      await refreshSessions();
+      openSession(name);
+    }
+  }
+
   // --- Helpers ---
   async function api(method, path, body) {
     try {

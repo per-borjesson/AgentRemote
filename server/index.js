@@ -4,6 +4,7 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { existsSync, readdirSync, statSync } from 'fs';
 import {
   listSessions, getSession, createSession, sendKeys,
   captureOutput, killSession, checkForApprovalPrompt,
@@ -80,6 +81,22 @@ app.post('/api/sessions/:name/resume', (req, res) => {
   knownResumable.delete(req.params.name);
   broadcast({ type: 'session_resumed', session: req.params.name });
   res.json({ ok: true });
+});
+
+app.get('/api/agents', (req, res) => {
+  const agentsDir = join(process.env.HOME, 'agents');
+  let dirs = [];
+  try {
+    dirs = readdirSync(agentsDir)
+      .filter(name => { try { return statSync(join(agentsDir, name)).isDirectory(); } catch { return false; } })
+      .sort()
+      .map(name => {
+        const dirPath = join(agentsDir, name);
+        const contextFile = ['CLAUDE.md', 'README.md'].find(f => existsSync(join(dirPath, f))) || null;
+        return { name, path: dirPath, contextFile };
+      });
+  } catch {}
+  res.json(dirs);
 });
 
 app.delete('/api/sessions/:name', (req, res) => {

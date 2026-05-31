@@ -328,6 +328,32 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
 }
 .modal-actions button.primary { background: var(--accent); color: #fff; border-color: transparent; }
 
+/* Load workspace dir list */
+.ls-dir-list {
+  display: flex;
+  flex-direction: column;
+  gap: .375rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+.ls-dir-item {
+  padding: .5rem .875rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: .9rem;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color .15s, background .15s;
+}
+.ls-dir-item:hover { border-color: var(--accent); }
+.ls-dir-item.selected { border-color: var(--accent); background: rgba(201,100,66,.12); }
+
 /* Kill confirmation sheet */
 .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: flex-end; z-index: 200; }
 .sheet-box {

@@ -28,6 +28,7 @@
           <span id="server-version" class="workdir">v20260523-4</span>
         </div>
         <button id="install-btn" class="icon-btn hidden" title="Install app">⬇</button>
+        <button id="load-session-btn" class="icon-btn" title="Load workspace">📂</button>
         <button id="new-session-btn" class="icon-btn" title="New session">+</button>
       </header>
 
@@ -87,6 +88,23 @@
         <div class="modal-actions">
           <button id="ns-cancel">Cancel</button>
           <button id="ns-create" class="primary">Start</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="load-session-modal" class="modal hidden">
+      <div class="modal-box">
+        <h2>Load Workspace</h2>
+        <div id="ls-dir-list" class="ls-dir-list"></div>
+        <input id="ls-custom-path" type="text" placeholder="Or enter custom path…">
+        <select id="ls-provider">
+          <option value="claude">🟣 Claude</option>
+          <option value="codex">⚡ Codex</option>
+          <option value="gemini">✨ Gemini</option>
+        </select>
+        <div class="modal-actions">
+          <button id="ls-cancel">Cancel</button>
+          <button id="ls-load" class="primary">Load</button>
         </div>
       </div>
     </div>
