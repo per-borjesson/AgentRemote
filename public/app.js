@@ -206,6 +206,7 @@
   function renderChat() {
     const key = conversation.map(e => e.role + e.text.length).join(',');
     if (key === lastChatKey) return;
+    if (window.getSelection()?.toString()) return;
     lastChatKey = key;
     const el = document.getElementById('chat-view');
     const c = document.getElementById('output-container');
@@ -242,6 +243,7 @@
   // --- Terminal view ---
   function renderOutput(text) {
     if (text === lastOutputText) return;
+    if (window.getSelection()?.toString()) return;
     lastOutputText = text;
     const el = document.getElementById('output');
     const c = document.getElementById('output-container');
