@@ -41,8 +41,9 @@ function extractCodexResponses(output) {
 // Tool-call blocks (● Update(...), ● Bash(...) etc.) are skipped — only
 // prose responses are forwarded to Telegram.
 
-// Matches tool-call ● lines: old-style "● ToolName(..." and new-style "● Reading 1 file…"
-const CLAUDE_TOOL_CALL = /^\s*●\s+(?:[A-Z][a-zA-Z]+[·(]|Call(?:ing|ed)\s|[A-Z][a-z]+ing \d)/;
+// Matches tool-call ● lines: old-style "● ToolName(..." and new-style summaries
+// "● Reading 1 file…", "● Searching for 1 pattern…", "● Committed abc123…"
+const CLAUDE_TOOL_CALL = /^\s*●\s+(?:[A-Z][a-zA-Z]+[·(]|Call(?:ing|ed)\s|[A-Z][a-z]+(?:ing|ed) (?:\w+ )?\d)/;
 // Matches the feedback prompt Claude occasionally shows
 const CLAUDE_FEEDBACK  = /How is Claude doing this session/;
 
@@ -181,7 +182,8 @@ export const PROVIDERS = {
       /^\s*Call(?:ing|ed)\s/,        // tool call progress sub-lines ("  Calling HubSpot…")
       /Smooshing/,                   // thinking display text
       /^\s*⎿/,                      // tip/sub-item prefix
-      /^\s+(?:Read|Ran|Listed|Wrote|Written|Edited|Created|Deleted|Fetched|Searched)\s+\d/, // tool completion summaries
+      /^\s+(?:Read|Ran|Listed|Wrote|Written|Edited|Created|Deleted|Fetched|Searched|Committed|Updated|Removed|Copied|Moved)\s+\d/, // tool completion summaries
+      /^\s+Committed\s+[0-9a-f]{6,}/, // "  Committed 6d057c…" (hash, not digit count)
       /ctrl\+b.*background/,        // background run hint
     ],
   },
