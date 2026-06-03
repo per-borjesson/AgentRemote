@@ -193,33 +193,39 @@ function addUserMessage(name, text) {
 setInterval(() => {
   const sessions = listSessions();
   for (const session of sessions) {
-    // Stream output to subscribed clients
-    const output = captureOutput(session.name, 300);
     const prov = getProvider(session.provider);
-    const incoming = prov.extractResponses(output);
-    mergeResponses(session.name, incoming);
-    const conversation = mergeConversation(session.name, incoming, prov);
-    for (const client of clients) {
-      if (client.readyState === 1 && client._watchSession === session.name) {
-        client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation }));
+    const isWatched = [...clients].some(c => c.readyState === 1 && c._watchSession === session.name);
+
+    // Single capture per session per cycle — 300 lines for watched sessions
+    // (streaming), 50 lines for unwatched (approval/resume checks only).
+    const output = captureOutput(session.name, isWatched ? 300 : 50);
+
+    // Stream output to subscribed clients (only when someone is watching)
+    if (isWatched) {
+      const incoming = prov.extractResponses(output);
+      mergeResponses(session.name, incoming);
+      const conversation = mergeConversation(session.name, incoming, prov);
+      for (const client of clients) {
+        if (client.readyState === 1 && client._watchSession === session.name) {
+          client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation }));
+        }
       }
     }
 
-    // Check for pending approvals
-    if (!session.pendingApproval && checkForApprovalPrompt(session.name)) {
+    // Check for pending approvals (reuse captured output)
+    if (!session.pendingApproval && checkForApprovalPrompt(session.name, output)) {
       if (!knownApprovals.has(session.name)) {
         knownApprovals.add(session.name);
-        const promptText = captureOutput(session.name, 20);
-        setApprovalPending(session.name, promptText);
-        broadcast({ type: 'approval_needed', session: session.name, prompt: promptText });
-        sendApprovalRequest(session.name, promptText).catch(() => {});
+        setApprovalPending(session.name, output);
+        broadcast({ type: 'approval_needed', session: session.name, prompt: output });
+        sendApprovalRequest(session.name, output).catch(() => {});
       }
     } else if (session.pendingApproval === null) {
       knownApprovals.delete(session.name);
     }
 
-    // Check for Claude exit with resume ID
-    const resumeId = checkForResume(session.name);
+    // Check for Claude exit with resume ID (reuse captured output)
+    const resumeId = checkForResume(session.name, output);
     if (resumeId && !knownResumable.has(session.name)) {
       knownResumable.add(session.name);
       broadcast({ type: 'session_resumable', session: session.name, resumeId });

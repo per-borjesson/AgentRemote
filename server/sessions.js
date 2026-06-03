@@ -47,8 +47,13 @@ export function listSessions() {
     .map(line => {
       const [name, created, activity] = line.replace(/"/g, '').split('|');
       const meta = sessionMeta.get(name) || {};
-      // If metadata was lost on restart, detect provider from tmux scrollback
-      const provider = meta.provider || detectProvider(name);
+      // If metadata was lost on restart, detect provider and cache it so we
+      // don't re-run the expensive display-message + capture-pane every cycle.
+      if (!meta.provider) {
+        meta.provider = detectProvider(name);
+        sessionMeta.set(name, meta);
+      }
+      const provider = meta.provider;
       return {
         name,
         created: parseInt(created) * 1000,
@@ -63,7 +68,7 @@ export function listSessions() {
     });
 }
 
-export function checkForResume(name) {
+export function checkForResume(name, output = null) {
   const meta = sessionMeta.get(name) || {};
   if (meta.resumeId) return meta.resumeId;
   const provider = getProvider(meta.provider || detectProvider(name));
@@ -77,8 +82,8 @@ export function checkForResume(name) {
     ).trim().toLowerCase();
     if (cmd.includes('claude') || cmd.includes('codex') || cmd.includes('gemini')) return null;
   } catch { return null; }
-  const output = captureOutput(name, 50).replace(/\x1b\[[0-9;]*m/g, '');
-  const m = output.match(provider.resumePattern);
+  const out = (output ?? captureOutput(name, 50)).replace(/\x1b\[[0-9;]*m/g, '');
+  const m = out.match(provider.resumePattern);
   if (!m) return null;
   meta.resumeId = m[1];
   meta.status = 'done';
@@ -176,11 +181,11 @@ export function killSession(name) {
   sessionMeta.delete(name);
 }
 
-export function checkForApprovalPrompt(name) {
+export function checkForApprovalPrompt(name, output = null) {
   const meta = sessionMeta.get(name) || {};
   const provider = getProvider(meta.provider);
-  const output = captureOutput(name, 20);
-  const lastLines = output.split('\n').slice(-5).join('\n');
+  const out = output ?? captureOutput(name, 20);
+  const lastLines = out.split('\n').slice(-5).join('\n');
   return provider.approvalPatterns.some(p => p.test(lastLines));
 }
 
