@@ -156,10 +156,13 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
 }
 
 export function sendKeys(name, keys, enter = false) {
-  const lines = keys.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i]) execSync(`tmux send-keys -t ${name} -l ${JSON.stringify(lines[i])}`, { encoding: 'utf8' });
-    if (i < lines.length - 1) execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' });
+  if (keys.includes('\n')) {
+    // Multi-line: use bracketed paste so newlines are literal characters in
+    // the input widget rather than triggering premature submission.
+    execSync(`tmux set-buffer -- ${JSON.stringify(keys)}`, { encoding: 'utf8' });
+    execSync(`tmux paste-buffer -p -t ${name}`, { encoding: 'utf8' });
+  } else if (keys) {
+    execSync(`tmux send-keys -t ${name} -l ${JSON.stringify(keys)}`, { encoding: 'utf8' });
   }
   if (enter) {
     setTimeout(() => execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' }), 300);
