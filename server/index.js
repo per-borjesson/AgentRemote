@@ -161,7 +161,7 @@ function mergeResponses(name, incoming) {
   const stored = storedResponses.get(name) || [];
   for (const resp of incoming) {
     const last = stored.length > 0 ? stored[stored.length - 1] : null;
-    if (last && resp.startsWith(last.slice(0, 40)) && resp !== last) {
+    if (last && resp.startsWith(last) && resp !== last) {
       stored[stored.length - 1] = resp;
     } else if (!stored.includes(resp)) {
       stored.push(resp);
@@ -180,7 +180,7 @@ function mergeConversation(name, incoming, provider) {
     if (!text) continue;
     const lastAIIdx = conv.reduce((idx, e, i) => e.role === 'ai' ? i : idx, -1);
     const lastAI = lastAIIdx >= 0 ? conv[lastAIIdx] : null;
-    if (lastAI && text.startsWith(lastAI.text.slice(0, 40)) && text !== lastAI.text) {
+    if (lastAI && text.startsWith(lastAI.text) && text !== lastAI.text) {
       conv[lastAIIdx] = { role: 'ai', text, ts: lastAI.ts || Date.now() };
     } else if (!conv.some(e => e.role === 'ai' && e.text === text)) {
       conv.push({ role: 'ai', text, ts: Date.now() });
