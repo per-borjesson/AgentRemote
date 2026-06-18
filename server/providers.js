@@ -69,6 +69,11 @@ function extractClaudeResponses(output) {
     const isTiming   = /^\s*[✻✽✢✶✸]/.test(line) || /^\s*[*·] \w[\w ]*[….]? \(\d+[ms]/.test(line);
     const isEmpty    = !line.trim();
 
+    // In-progress tool status lines ("  Searching for 1 pattern…") appear
+    // indented inside prose blocks and mutate in-place between polls, causing
+    // the same response to look different each cycle and break dedup.
+    const isInProgressStatus = /^\s{2,}[A-Z][a-z]+ing (?:for )?\d/.test(line);
+
     if (isResponse) {
       flush();
       const text = line.replace(/^\s*●\s*/, '');
@@ -77,6 +82,7 @@ function extractClaudeResponses(output) {
       trailingEmpties = 0;
     } else if (block !== null) {
       if (isPrompt || isSep || isTiming) { flush(); }
+      else if (isInProgressStatus) { /* skip mutable tool status lines */ }
       else if (isEmpty) { trailingEmpties++; block += '\n'; }
       else { block += '\n'.repeat(trailingEmpties + 1) + line; trailingEmpties = 0; }
     }
