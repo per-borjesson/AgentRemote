@@ -259,28 +259,42 @@
   const qQuestion = document.getElementById('questionnaire-question');
   const qOptions = document.getElementById('questionnaire-options');
 
+  let activeQuestionnaire = null;
+
   function showQuestionnaireBanner(q) {
+    activeQuestionnaire = q;
     qQuestion.textContent = q.question || '';
-    qOptions.innerHTML = q.items.map((item, idx) => {
-      const cls = ['q-opt-btn',
-        item.isNext ? 'q-next' : '',
-        item.afterSep ? 'q-sep' : '',
-        item.hasCheckbox && item.checked ? 'q-checked' : '',
-      ].filter(Boolean).join(' ');
-      const prefix = item.hasCheckbox ? (item.checked ? '✔ ' : '○ ') : '';
-      return `<button class="${cls}" data-idx="${idx}">${prefix}${item.label}</button>`;
-    }).join('');
+    // Only render numbered/checkbox options — not Next/navigation items
+    qOptions.innerHTML = q.items
+      .map((item, idx) => ({ item, idx }))
+      .filter(({ item }) => !item.isNext && !item.afterSep)
+      .map(({ item, idx }) => {
+        const cls = ['q-opt-btn', item.hasCheckbox && item.checked ? 'q-checked' : ''].filter(Boolean).join(' ');
+        const prefix = item.hasCheckbox ? (item.checked ? '✔ ' : '○ ') : '';
+        return `<button class="${cls}" data-idx="${idx}">${prefix}${item.label}</button>`;
+      }).join('') +
+      `<button class="q-opt-btn q-next" data-submit="1">Submit</button>`;
     qBanner.classList.remove('hidden');
   }
 
   function hideQuestionnaireBanner() {
+    activeQuestionnaire = null;
     qBanner.classList.add('hidden');
   }
 
   qOptions.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-idx]');
+    const btn = e.target.closest('[data-idx], [data-submit]');
     if (!btn) return;
-    await api('POST', `/api/sessions/${currentSession}/questionnaire`, { targetIdx: parseInt(btn.dataset.idx) });
+    if (btn.dataset.submit) {
+      // Find the Next item index (for navigation) or default past all items
+      const nextIdx = activeQuestionnaire
+        ? activeQuestionnaire.items.findIndex(item => item.isNext)
+        : -1;
+      const targetIdx = nextIdx >= 0 ? nextIdx : (activeQuestionnaire ? activeQuestionnaire.items.length : 5);
+      await api('POST', `/api/sessions/${currentSession}/questionnaire`, { targetIdx });
+    } else {
+      await api('POST', `/api/sessions/${currentSession}/questionnaire`, { targetIdx: parseInt(btn.dataset.idx) });
+    }
   });
 
   // --- Approval banner ---

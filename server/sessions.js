@@ -214,13 +214,15 @@ export function parseQuestionnaire(output) {
 
 // Navigate to targetIdx and press Enter. Re-reads output to get fresh cursor position.
 export function answerQuestionnaire(name, targetIdx) {
-  const output = captureOutput(name, 40);
+  const output = captureOutput(name, 60);
   const q = parseQuestionnaire(output);
   const cursorIdx = q ? q.cursorIdx : 0;
   const delta = targetIdx - cursorIdx;
   const key = delta >= 0 ? 'Down' : 'Up';
+  // Small delay between keypresses to prevent the TUI from dropping rapid input
   for (let i = 0; i < Math.abs(delta); i++) {
     execSync(`tmux send-keys -t ${name} ${key}`, { encoding: 'utf8' });
+    execSync('sleep 0.05', { encoding: 'utf8' });
   }
   execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' });
 }
