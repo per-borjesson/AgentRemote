@@ -201,7 +201,7 @@ export function parseQuestionnaire(output) {
       items.push({ label: 'Next →', isNext: true });
       continue;
     }
-    if (/^─{5,}/.test(line)) { afterSep = true; continue; }
+    if (/^─{5,}/.test(line)) { if (foundFirst) afterSep = true; continue; }
     // Question text: last non-empty, non-nav-header, non-separator line before first option
     if (!foundFirst && line.trim() && !/^\s*[←→☒☐✔]/.test(line)) {
       question = line.trim();
