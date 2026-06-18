@@ -169,6 +169,62 @@ export function sendKeys(name, keys, enter = false) {
   }
 }
 
+// Parse Claude Code's interactive multi-choice questionnaire from captured output.
+// Returns { question, items, cursorIdx } or null if no questionnaire is active.
+export function parseQuestionnaire(output) {
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
+  if (!/Enter to select/.test(clean)) return null;
+
+  const lines = clean.split('\n');
+  const items = [];
+  let cursorIdx = 0;
+  let question = '';
+  let foundFirst = false;
+  let afterSep = false;
+
+  for (const line of lines) {
+    // Numbered option line: optional ❯, number, dot, optional [✔]/[ ], label
+    const m = line.match(/^\s*(❯\s+)?(\d+)\.\s+(?:\[(.)\]\s+)?(.+)/);
+    if (m) {
+      if (m[1]) cursorIdx = items.length;
+      items.push({
+        label: m[4].trim(),
+        checked: m[3] === '✔' || m[3] === 'x' || m[3] === 'X',
+        hasCheckbox: m[3] !== undefined,
+        afterSep,
+      });
+      foundFirst = true;
+      continue;
+    }
+    // "Next" navigation button (indented, no number, before separator)
+    if (foundFirst && !afterSep && /^\s{2,}Next\s*$/.test(line)) {
+      items.push({ label: 'Next →', isNext: true });
+      continue;
+    }
+    if (/^─{5,}/.test(line)) { afterSep = true; continue; }
+    // Question text: last non-empty, non-nav-header, non-separator line before first option
+    if (!foundFirst && line.trim() && !/^\s*[←→☒☐✔]/.test(line)) {
+      question = line.trim();
+    }
+  }
+
+  if (items.length === 0) return null;
+  return { question, items, cursorIdx };
+}
+
+// Navigate to targetIdx and press Enter. Re-reads output to get fresh cursor position.
+export function answerQuestionnaire(name, targetIdx) {
+  const output = captureOutput(name, 40);
+  const q = parseQuestionnaire(output);
+  const cursorIdx = q ? q.cursorIdx : 0;
+  const delta = targetIdx - cursorIdx;
+  const key = delta >= 0 ? 'Down' : 'Up';
+  for (let i = 0; i < Math.abs(delta); i++) {
+    execSync(`tmux send-keys -t ${name} ${key}`, { encoding: 'utf8' });
+  }
+  execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' });
+}
+
 export function captureOutput(name, lines = 100) {
   try {
     return tmux('capture-pane', '-t', name, '-p', '-S', `-${lines}`);

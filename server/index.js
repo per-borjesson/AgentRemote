@@ -10,6 +10,7 @@ import {
   captureOutput, killSession, checkForApprovalPrompt,
   setApprovalPending, respondToApproval, setSessionStatus,
   checkTmuxSizes, checkForResume, resumeSession,
+  parseQuestionnaire, answerQuestionnaire,
 } from './sessions.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
@@ -80,6 +81,13 @@ app.post('/api/sessions/:name/resume', (req, res) => {
   if (!ok) return res.status(400).json({ error: 'no resume ID available' });
   knownResumable.delete(req.params.name);
   broadcast({ type: 'session_resumed', session: req.params.name });
+  res.json({ ok: true });
+});
+
+app.post('/api/sessions/:name/questionnaire', (req, res) => {
+  const { targetIdx } = req.body;
+  if (targetIdx === undefined) return res.status(400).json({ error: 'targetIdx required' });
+  answerQuestionnaire(req.params.name, targetIdx);
   res.json({ ok: true });
 });
 
@@ -205,9 +213,10 @@ setInterval(() => {
       const incoming = prov.extractResponses(output);
       mergeResponses(session.name, incoming);
       const conversation = mergeConversation(session.name, incoming, prov);
+      const questionnaire = parseQuestionnaire(output);
       for (const client of clients) {
         if (client.readyState === 1 && client._watchSession === session.name) {
-          client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation }));
+          client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation, questionnaire: questionnaire || null }));
         }
       }
     }

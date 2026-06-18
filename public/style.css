@@ -134,6 +134,43 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
 .approval-actions .approve { background: var(--green); color: #fff; }
 .approval-actions .reject { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
 
+/* Questionnaire banner */
+.questionnaire-banner {
+  background: rgba(123, 140, 222, .1);
+  border-bottom: 1px solid #7b8cde;
+  padding: .875rem 1rem;
+  flex-shrink: 0;
+}
+.questionnaire-banner > p {
+  font-size: .8rem;
+  color: #7b8cde;
+  margin-bottom: .625rem;
+  font-weight: 500;
+}
+.questionnaire-options { display: flex; flex-wrap: wrap; gap: .5rem; }
+.q-opt-btn {
+  flex: 1 1 calc(50% - .25rem);
+  padding: .5rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: .85rem;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  line-height: 1.3;
+  transition: border-color .15s;
+}
+.q-opt-btn:hover { border-color: #7b8cde; }
+.q-opt-btn.q-checked { border-color: #7b8cde; color: #7b8cde; }
+.q-opt-btn.q-next, .q-opt-btn.q-sep {
+  flex: 1 1 100%;
+  text-align: center;
+  font-weight: 600;
+}
+.q-opt-btn.q-next { background: #7b8cde; color: #fff; border-color: #7b8cde; }
+
 /* Resume banner */
 .resume-banner {
   background: rgba(78, 158, 114, .1);

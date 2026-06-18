@@ -83,6 +83,8 @@
         if (chatMode) renderChat();
       }
       renderOutput(msg.output);
+      if (msg.questionnaire) showQuestionnaireBanner(msg.questionnaire);
+      else hideQuestionnaireBanner();
     }
     if (msg.type === 'user_input' && msg.session === currentSession) {
       // Optimistic bubble already added locally; server broadcast is for other clients
@@ -251,6 +253,35 @@
     el.textContent = text;
     if (!chatMode && atBottom) c.scrollTop = c.scrollHeight;
   }
+
+  // --- Questionnaire banner ---
+  const qBanner = document.getElementById('questionnaire-banner');
+  const qQuestion = document.getElementById('questionnaire-question');
+  const qOptions = document.getElementById('questionnaire-options');
+
+  function showQuestionnaireBanner(q) {
+    qQuestion.textContent = q.question || '';
+    qOptions.innerHTML = q.items.map((item, idx) => {
+      const cls = ['q-opt-btn',
+        item.isNext ? 'q-next' : '',
+        item.afterSep ? 'q-sep' : '',
+        item.hasCheckbox && item.checked ? 'q-checked' : '',
+      ].filter(Boolean).join(' ');
+      const prefix = item.hasCheckbox ? (item.checked ? '✔ ' : '○ ') : '';
+      return `<button class="${cls}" data-idx="${idx}">${prefix}${item.label}</button>`;
+    }).join('');
+    qBanner.classList.remove('hidden');
+  }
+
+  function hideQuestionnaireBanner() {
+    qBanner.classList.add('hidden');
+  }
+
+  qOptions.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-idx]');
+    if (!btn) return;
+    await api('POST', `/api/sessions/${currentSession}/questionnaire`, { targetIdx: parseInt(btn.dataset.idx) });
+  });
 
   // --- Approval banner ---
   function showApprovalBanner(promptText) {
