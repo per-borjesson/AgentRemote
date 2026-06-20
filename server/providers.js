@@ -69,10 +69,10 @@ function extractClaudeResponses(output) {
     const isTiming   = /^\s*[✻✽✢✶✸]/.test(line) || /^\s*[*·] \w[\w ]*[….]? \(\d+[ms]/.test(line);
     const isEmpty    = !line.trim();
 
-    // In-progress tool status lines ("  Searching for 1 pattern…") appear
-    // indented inside prose blocks and mutate in-place between polls, causing
-    // the same response to look different each cycle and break dedup.
+    // In-progress tool status lines and the token-count status bar mutate
+    // between polls and must be excluded from prose blocks to keep texts stable.
     const isInProgressStatus = /^\s{2,}[A-Z][a-z]+ing (?:for )?\d/.test(line);
+    const isStatusBar = /\/clear to start fresh/.test(line);
 
     if (isResponse) {
       flush();
@@ -82,7 +82,7 @@ function extractClaudeResponses(output) {
       trailingEmpties = 0;
     } else if (block !== null) {
       if (isPrompt || isSep || isTiming) { flush(); }
-      else if (isInProgressStatus) { /* skip mutable tool status lines */ }
+      else if (isInProgressStatus || isStatusBar) { /* skip mutable status lines */ }
       else if (isEmpty) { trailingEmpties++; block += '\n'; }
       else { block += '\n'.repeat(trailingEmpties + 1) + line; trailingEmpties = 0; }
     }
@@ -191,6 +191,7 @@ export const PROVIDERS = {
       /^\s+(?:Read|Ran|Listed|Wrote|Written|Edited|Created|Deleted|Fetched|Searched|Committed|Updated|Removed|Copied|Moved)\s+\d/, // tool completion summaries
       /^\s+Committed\s+[0-9a-f]{6,}/, // "  Committed 6d057c…" (hash, not digit count)
       /ctrl\+b.*background/,        // background run hint
+      /\/clear to start fresh/,     // token-count status bar ("~93k uncached · /clear to start fresh")
     ],
   },
 
