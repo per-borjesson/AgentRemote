@@ -84,7 +84,14 @@ function extractClaudeResponses(output) {
       if (isPrompt || isSep || isTiming) { flush(); }
       else if (isInProgressStatus || isStatusBar) { /* skip mutable status lines */ }
       else if (isEmpty) { trailingEmpties++; block += '\n'; }
-      else { block += '\n'.repeat(trailingEmpties + 1) + line; trailingEmpties = 0; }
+      else {
+        // Strip trailing run-timer ("… (12s)", "… (1m 30s)") that Claude Code
+        // embeds at the end of the last code line while a tool executes. It
+        // updates every poll and makes otherwise-identical lines differ.
+        const lineClean = line.replace(/\s*…\s*\(\d[^)]*\)\s*$/, '');
+        block += '\n'.repeat(trailingEmpties + 1) + lineClean;
+        trailingEmpties = 0;
+      }
     }
   }
   flush();
