@@ -210,10 +210,7 @@ setInterval(() => {
 
     // Stream output to subscribed clients (only when someone is watching)
     if (isWatched) {
-      // Limit extraction to last ~80 lines so long responses scrolling off the
-      // top of the 300-line window don't get re-added as truncated duplicates.
-      const extractWindow = output.split('\n').slice(-80).join('\n');
-      const incoming = prov.extractResponses(extractWindow);
+      const incoming = prov.extractResponses(output);
       mergeResponses(session.name, incoming);
       const conversation = mergeConversation(session.name, incoming, prov);
       const questionnaire = parseQuestionnaire(output);
