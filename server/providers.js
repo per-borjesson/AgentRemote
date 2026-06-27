@@ -65,8 +65,12 @@ function extractClaudeResponses(output) {
     // Only unindented ❯ is the user prompt — questionnaire options use indented ❯
     const isPrompt   = /^❯/.test(line);
     const isSep      = /^─{5,}/.test(line);
-    // Old-style ✻/✽/… spinners and new-style "* Roosting… (4s …)" / "· Roosting… (12s …)"
-    const isTiming   = /^\s*[✻✽✢✶✸]/.test(line) || /^\s*[*·] \w[\w ]*[….]? \(\d+[ms]/.test(line);
+    // Old-style ✻/✽/… spinners and new-style "* Roosting… (4s)" / "· Flambéing… (12s)"
+    // Use \S (non-whitespace) instead of \w so Unicode spinner words (é, etc.) match.
+    // Single-word form (no timer yet) also caught: "* Flambéing"
+    const isTiming   = /^\s*[✻✽✢✶✸]/.test(line)
+      || /^\s*[*·] \S[\S ]*[….]? \(\d+[ms]/.test(line)
+      || /^\s*[*·] [A-Z]\S*ing[\.…]?(\s*\(\d[^)]*\))?\s*$/.test(line);
     const isEmpty    = !line.trim();
 
     // Mutable lines that must be excluded from prose blocks to keep texts stable.
@@ -79,7 +83,9 @@ function extractClaudeResponses(output) {
     if (isResponse) {
       flush();
       const text = line.replace(/^\s*●\s*/, '');
-      skipBlock = CLAUDE_TOOL_CALL.test(line) || CLAUDE_FEEDBACK.test(text);
+      // "● main   ↑/↓ to select · Enter to view" is the background task viewer panel
+      const isBgTaskViewer = /^main\s{5,}/.test(text);
+      skipBlock = CLAUDE_TOOL_CALL.test(line) || CLAUDE_FEEDBACK.test(text) || isBgTaskViewer;
       block = text;
       trailingEmpties = 0;
     } else if (block !== null) {
