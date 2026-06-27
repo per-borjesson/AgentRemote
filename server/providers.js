@@ -69,10 +69,12 @@ function extractClaudeResponses(output) {
     const isTiming   = /^\s*[✻✽✢✶✸]/.test(line) || /^\s*[*·] \w[\w ]*[….]? \(\d+[ms]/.test(line);
     const isEmpty    = !line.trim();
 
-    // In-progress tool status lines and the token-count status bar mutate
-    // between polls and must be excluded from prose blocks to keep texts stable.
+    // Mutable lines that must be excluded from prose blocks to keep texts stable.
     const isInProgressStatus = /^\s{2,}[A-Z][a-z]+ing (?:for )?\d/.test(line);
     const isStatusBar = /\/clear to start fresh/.test(line);
+    // Inline tool invocations (Fetch/WebSearch) inside prose blocks appear and
+    // disappear as parallel tools complete — skip them so prose stays stable.
+    const isInlineToolCall = /^\s+(?:Fetch|Web Search|WebSearch)\(/.test(line);
 
     if (isResponse) {
       flush();
@@ -82,7 +84,7 @@ function extractClaudeResponses(output) {
       trailingEmpties = 0;
     } else if (block !== null) {
       if (isPrompt || isSep || isTiming) { flush(); }
-      else if (isInProgressStatus || isStatusBar) { /* skip mutable status lines */ }
+      else if (isInProgressStatus || isStatusBar || isInlineToolCall) { /* skip mutable/unstable lines */ }
       else if (isEmpty) { trailingEmpties++; block += '\n'; }
       else {
         // Strip trailing run-timer ("… (12s)", "… (1m 30s)") that Claude Code
