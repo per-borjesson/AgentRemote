@@ -232,6 +232,9 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
 .md-ai .md-list li { font-size: .92rem; line-height: 1.65; margin-bottom: .2rem; }
 .md-ai code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .8em; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
 .md-ai .code-block { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1rem; margin: .5rem 0; overflow-x: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: .78rem; line-height: 1.5; white-space: pre; }
+.md-ts { display: block; font-size: .65rem; opacity: .45; margin-top: .3rem; }
+.md-user .md-ts { text-align: right; }
+.md-ai .md-ts { text-align: left; }
 #output {
   font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
   font-size: .8rem;

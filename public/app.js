@@ -345,24 +345,20 @@
     }
     if (blockLines !== null) blocks.push(blockLines.join('\n').trim());
 
-    // Interleave user messages from conversation array between AI blocks
-    // User messages are ordered by timestamp; match them before each AI block
-    // by position (simple: prepend all user messages before their AI responses)
-    const userMsgs = conversation.filter(e => e.role === 'user');
+    // Use conversation array for correct ordering (user + ai interleaved).
+    // For AI entries, prefer the tmux-extracted block at the same position
+    // (latest capture, noise-stripped) — fall back to conversation text.
     const aiBlocks = blocks.filter(Boolean);
-
-    // Build interleaved html: user msg → ai block pairs, from oldest visible
-    // Heuristic: pair each user message with the next AI block by index
-    const sections = [];
-    const maxPairs = Math.max(userMsgs.length, aiBlocks.length);
-    for (let i = 0; i < maxPairs; i++) {
-      if (userMsgs[i]) {
-        sections.push(`<div class="md-user">${esc(userMsgs[i].text)}</div>`);
+    let aiIdx = 0;
+    const sections = conversation.map(entry => {
+      const ts = entry.ts ? `<span class="md-ts">${formatMsgTime(entry.ts)}</span>` : '';
+      if (entry.role === 'user') {
+        return `<div class="md-user">${esc(entry.text)}${ts}</div>`;
       }
-      if (aiBlocks[i]) {
-        sections.push(`<div class="md-ai">${renderMarkdown(aiBlocks[i])}</div>`);
-      }
-    }
+      const text = aiBlocks[aiIdx] || entry.text;
+      aiIdx++;
+      return `<div class="md-ai">${renderMarkdown(text)}${ts}</div>`;
+    });
 
     el.innerHTML = `<div class="md-content">${sections.join('')}</div>`;
     if (atBottom) c.scrollTop = c.scrollHeight;
