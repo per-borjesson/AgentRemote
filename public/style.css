@@ -201,13 +201,37 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
 
 /* Markdown view */
 #markdown-view { display: flex; flex-direction: column; }
-.md-content { padding-bottom: .5rem; }
-.md-content hr.md-sep { border: none; border-top: 1px solid var(--border); margin: .75rem 0; }
-.md-content p { margin: 0 0 .4rem; font-size: .9rem; line-height: 1.55; color: var(--text); }
-.md-content p:last-child { margin-bottom: 0; }
-.md-content strong { font-weight: 600; }
-.md-content code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .8em; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
-.md-content .code-block { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1rem; margin: .5rem 0; overflow-x: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: .78rem; line-height: 1.5; white-space: pre; }
+.md-content { padding-bottom: 1rem; display: flex; flex-direction: column; gap: 0; }
+
+.md-user {
+  align-self: flex-end;
+  max-width: 80%;
+  background: var(--accent);
+  color: #fff;
+  padding: .625rem .9rem;
+  border-radius: 18px 18px 4px 18px;
+  font-size: .9rem;
+  line-height: 1.5;
+  margin: .5rem 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.md-ai {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: .75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.md-ai:last-child { border-bottom: none; }
+.md-ai p { margin: 0 0 .6rem; font-size: .92rem; line-height: 1.65; color: var(--text); }
+.md-ai p:last-child { margin-bottom: 0; }
+.md-ai strong { font-weight: 600; }
+.md-ai em { font-style: italic; color: var(--muted); }
+.md-ai h4, .md-ai h5 { font-size: .9rem; font-weight: 600; margin: .75rem 0 .25rem; color: var(--text); letter-spacing: -.01em; }
+.md-ai .md-list { margin: .25rem 0 .6rem 1.25rem; padding: 0; }
+.md-ai .md-list li { font-size: .92rem; line-height: 1.65; margin-bottom: .2rem; }
+.md-ai code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .8em; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
+.md-ai .code-block { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1rem; margin: .5rem 0; overflow-x: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: .78rem; line-height: 1.5; white-space: pre; }
 #output {
   font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
   font-size: .8rem;

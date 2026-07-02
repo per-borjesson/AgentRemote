@@ -240,20 +240,43 @@
   }
 
   function renderMarkdown(text) {
-    // Split on fenced code blocks, process each part separately
+    // Split on fenced code blocks first
     const parts = text.split(/(```[\s\S]*?```)/g);
     const html = parts.map((part, i) => {
       if (i % 2 === 1) {
         const inner = part.slice(3, -3).replace(/^[^\n]*\n/, '');
         return `<pre class="code-block"><code>${esc(inner)}</code></pre>`;
       }
-      return esc(part)
-        .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n\n+/g, '</p><p>')
-        .replace(/\n/g, '<br>');
+      // Process prose: split into paragraphs, then handle block-level elements
+      return part.split(/\n\n+/).map(para => {
+        const lines = para.split('\n').filter(l => l.trim());
+        if (!lines.length) return '';
+        // Heading
+        const hm = lines[0].match(/^(#{1,3})\s+(.+)/);
+        if (hm && lines.length === 1) {
+          const tag = 'h' + (hm[1].length + 2); // ## → h4, ### → h5
+          return `<${tag} class="md-h">${esc(hm[2])}</${tag}>`;
+        }
+        // List (all lines start with - or * or number.)
+        const isList = lines.every(l => /^\s*[-*]\s/.test(l) || /^\s*\d+\.\s/.test(l));
+        if (isList) {
+          const ordered = /^\s*\d+\.\s/.test(lines[0]);
+          const tag = ordered ? 'ol' : 'ul';
+          const items = lines.map(l => `<li>${inlineMarkdown(l.replace(/^\s*(?:[-*]|\d+\.)\s+/, ''))}</li>`).join('');
+          return `<${tag} class="md-list">${items}</${tag}>`;
+        }
+        // Normal paragraph
+        return `<p>${lines.map(inlineMarkdown).join('<br>')}</p>`;
+      }).join('');
     }).join('');
-    return `<p>${html}</p>`;
+    return html;
+  }
+
+  function inlineMarkdown(text) {
+    return esc(text)
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
   }
 
   // --- Terminal view ---
@@ -269,8 +292,8 @@
   }
 
   // --- Markdown view ---
-  // Strips terminal noise from raw tmux output, extracts Claude's prose + tool
-  // blocks, and renders them as markdown. Bypasses the conversation dedup logic.
+  // Extracts ● response blocks from raw tmux output, strips noise, renders as
+  // markdown, and interleaves user messages from the conversation array.
   function renderMarkdownView(rawOutput) {
     const key = rawOutput.length + rawOutput.slice(-40);
     if (key === lastMarkdownKey) return;
@@ -281,72 +304,67 @@
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
 
-    // Strip ANSI codes
     const clean = rawOutput.replace(/\x1b\[[0-9;]*[mGKHF]/g, '');
 
-    // Noise line patterns (mirrors server-side noisePatterns)
     const NOISE = [
-      /^\s*❯/,
-      /Claude Code v[\d.]+/,
-      /(?:Sonnet|Opus|Haiku).*·/,
-      /▐▛|▝▜|▘▘/,
-      /[✻✽✢✶✸]/,
-      /^\s*[*·] \S[\S ]*[….]? \(\d+[ms]/,
+      /^\s*❯/, /Claude Code v[\d.]+/, /(?:Sonnet|Opus|Haiku).*·/, /▐▛|▝▜|▘▘/,
+      /[✻✽✢✶✸]/, /^\s*[*·] \S[\S ]*[….]? \(\d+[ms]/,
       /^\s*[*·] [A-Z]\S*ing[\.…]?(\s*\(\d[^)]*\))?\s*$/,
-      /⏵⏵ bypass permissions/,
-      /^─{5,}/,
-      /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,
-      /\b(low|medium|high)\s*·\s*\/effort/,
-      /^\s*⎿/,
+      /⏵⏵ bypass permissions/, /^─{5,}/, /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,
+      /\b(low|medium|high)\s*·\s*\/effort/, /^\s*⎿/,
       /^\s+(?:Read|Ran|Listed|Wrote|Written|Edited|Created|Deleted|Fetched|Searched|Committed|Updated|Removed|Copied|Moved)\s+\d/,
-      /^\s+Committed\s+[0-9a-f]{6,}/,
-      /ctrl\+b.*background/,
-      /\/clear to start fresh/,
-      /^\s+(?:Fetch|Web Search|WebSearch)\(/,
-      /^\s{2,}[A-Z][a-z]+ing (?:for )?\d/,
-      /^main\s{5,}/,
-      /◯\s+general-purpose/,
-      /↑\/↓ to select/,
-      /·\s*↓\s*\d+\.?\d*k tokens/,
-      /%\s*until auto-compact/,
+      /^\s+Committed\s+[0-9a-f]{6,}/, /ctrl\+b.*background/, /\/clear to start fresh/,
+      /^\s+(?:Fetch|Web Search|WebSearch)\(/, /^\s{2,}[A-Z][a-z]+ing (?:for )?\d/,
+      /^main\s{5,}/, /◯\s+general-purpose/, /↑\/↓ to select/,
+      /·\s*↓\s*\d+\.?\d*k tokens/, /%\s*until auto-compact/,
     ];
 
-    const lines = clean.split('\n');
-    const kept = [];
-    let inBlock = false; // inside a ● response block
+    // Collect prose blocks from tmux output
+    const blocks = []; // { text: string }
+    let blockLines = null;
 
-    for (const line of lines) {
-      const isResponseStart = /^\s*●\s/.test(line);
-      const isPrompt = /^❯/.test(line);
-      const isSep = /^─{5,}/.test(line);
-      const isNoise = NOISE.some(p => p.test(line));
-
-      if (isResponseStart) {
-        inBlock = true;
+    for (const line of clean.split('\n')) {
+      if (/^\s*●\s/.test(line)) {
+        if (blockLines !== null) blocks.push(blockLines.join('\n').trim());
         const text = line.replace(/^\s*●\s*/, '').replace(/\s*…\s*\(\d[^)]*\)\s*$/, '');
-        // Skip tool call headers and feedback prompts
         if (/^(?:[A-Z][a-zA-Z]+[·(]|How is Claude doing)/.test(text) || /^main\s{5,}/.test(text)) {
-          inBlock = false;
-        } else if (text.trim()) {
-          kept.push('', '---', text);
+          blockLines = null;
+        } else {
+          blockLines = text.trim() ? [text] : [];
         }
         continue;
       }
-      if (isPrompt || isSep) { inBlock = false; continue; }
-      if (!inBlock) continue;
-      if (isNoise) continue;
-      const cleaned = line.replace(/\s*…\s*\(\d[^)]*\)\s*$/, '');
-      kept.push(cleaned);
+      if (/^❯/.test(line) || /^─{5,}/.test(line)) {
+        if (blockLines !== null) blocks.push(blockLines.join('\n').trim());
+        blockLines = null;
+        continue;
+      }
+      if (blockLines === null) continue;
+      if (NOISE.some(p => p.test(line))) continue;
+      blockLines.push(line.replace(/\s*…\s*\(\d[^)]*\)\s*$/, ''));
+    }
+    if (blockLines !== null) blocks.push(blockLines.join('\n').trim());
+
+    // Interleave user messages from conversation array between AI blocks
+    // User messages are ordered by timestamp; match them before each AI block
+    // by position (simple: prepend all user messages before their AI responses)
+    const userMsgs = conversation.filter(e => e.role === 'user');
+    const aiBlocks = blocks.filter(Boolean);
+
+    // Build interleaved html: user msg → ai block pairs, from oldest visible
+    // Heuristic: pair each user message with the next AI block by index
+    const sections = [];
+    const maxPairs = Math.max(userMsgs.length, aiBlocks.length);
+    for (let i = 0; i < maxPairs; i++) {
+      if (userMsgs[i]) {
+        sections.push(`<div class="md-user">${esc(userMsgs[i].text)}</div>`);
+      }
+      if (aiBlocks[i]) {
+        sections.push(`<div class="md-ai">${renderMarkdown(aiBlocks[i])}</div>`);
+      }
     }
 
-    // Render each kept line through the existing markdown renderer
-    const html = kept.map(line => {
-      if (line === '---') return '<hr class="md-sep">';
-      if (line === '') return '';
-      return renderMarkdown(line);
-    }).join('\n');
-
-    el.innerHTML = `<div class="md-content">${html}</div>`;
+    el.innerHTML = `<div class="md-content">${sections.join('')}</div>`;
     if (atBottom) c.scrollTop = c.scrollHeight;
   }
 
