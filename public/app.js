@@ -3,9 +3,11 @@
   let token = localStorage.getItem(TOKEN_KEY) || '';
   let ws = null;
   let currentSession = null;
-  let chatMode = true;
+  // viewMode: 'chat' | 'markdown' | 'terminal'
+  let viewMode = 'chat';
   let conversation = [];
   let lastChatKey = '';
+  let lastMarkdownKey = '';
   let lastOutputText = '';
 
   // --- Screens ---
@@ -80,8 +82,9 @@
           e.role === 'user' && !msg.conversation.some(s => s.role === 'user' && s.text === e.text)
         );
         conversation = [...msg.conversation, ...pending];
-        if (chatMode) renderChat();
+        if (viewMode === 'chat') renderChat();
       }
+      if (viewMode === 'markdown') renderMarkdownView(msg.output);
       renderOutput(msg.output);
       if (msg.questionnaire) showQuestionnaireBanner(msg.questionnaire);
       else hideQuestionnaireBanner();
@@ -160,9 +163,10 @@
     const wdEl = document.getElementById('session-workdir');
     if (wdEl) wdEl.textContent = session?.workdir || '';
     document.getElementById('chat-view').innerHTML = '';
+    document.getElementById('markdown-view').innerHTML = '';
     document.getElementById('output').textContent = '';
     showScreen('session');
-    setChatMode(true);
+    setViewMode('chat');
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'subscribe_output', session: name }));
@@ -187,23 +191,33 @@
     if (!res) return;
     if (res.conversation) {
       conversation = res.conversation;
-      if (chatMode) renderChat();
+      if (viewMode === 'chat') renderChat();
     }
+    if (viewMode === 'markdown') renderMarkdownView(res.output);
     renderOutput(res.output);
   }
 
-  // --- Chat view ---
-  function setChatMode(on) {
-    chatMode = on;
-    document.getElementById('chat-view').classList.toggle('hidden', !on);
-    document.getElementById('output').classList.toggle('hidden', on);
+  // --- View mode: chat | markdown | terminal ---
+  const VIEW_CYCLE = ['chat', 'markdown', 'terminal'];
+  const VIEW_ICONS = { chat: '⌨', markdown: 'M↓', terminal: '💬' };
+  const VIEW_TITLES = { chat: 'Switch to markdown view', markdown: 'Switch to terminal view', terminal: 'Switch to chat view' };
+
+  function setViewMode(mode) {
+    viewMode = mode;
+    document.getElementById('chat-view').classList.toggle('hidden', mode !== 'chat');
+    document.getElementById('markdown-view').classList.toggle('hidden', mode !== 'markdown');
+    document.getElementById('output').classList.toggle('hidden', mode !== 'terminal');
     const btn = document.getElementById('view-toggle-btn');
-    btn.textContent = on ? '⌨' : '💬';
-    btn.title = on ? 'Switch to terminal view' : 'Switch to chat view';
-    if (on) renderChat();
+    btn.textContent = VIEW_ICONS[mode];
+    btn.title = VIEW_TITLES[mode];
+    if (mode === 'chat') renderChat();
+    if (mode === 'markdown' && lastOutputText) renderMarkdownView(lastOutputText);
   }
 
-  document.getElementById('view-toggle-btn').addEventListener('click', () => setChatMode(!chatMode));
+  document.getElementById('view-toggle-btn').addEventListener('click', () => {
+    const next = VIEW_CYCLE[(VIEW_CYCLE.indexOf(viewMode) + 1) % VIEW_CYCLE.length];
+    setViewMode(next);
+  });
 
   function renderChat() {
     const key = conversation.map(e => e.role + e.text.length).join(',');
@@ -251,7 +265,89 @@
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 40;
     el.textContent = text;
-    if (!chatMode && atBottom) c.scrollTop = c.scrollHeight;
+    if (viewMode === 'terminal' && atBottom) c.scrollTop = c.scrollHeight;
+  }
+
+  // --- Markdown view ---
+  // Strips terminal noise from raw tmux output, extracts Claude's prose + tool
+  // blocks, and renders them as markdown. Bypasses the conversation dedup logic.
+  function renderMarkdownView(rawOutput) {
+    const key = rawOutput.length + rawOutput.slice(-40);
+    if (key === lastMarkdownKey) return;
+    if (window.getSelection()?.toString()) return;
+    lastMarkdownKey = key;
+
+    const el = document.getElementById('markdown-view');
+    const c = document.getElementById('output-container');
+    const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
+
+    // Strip ANSI codes
+    const clean = rawOutput.replace(/\x1b\[[0-9;]*[mGKHF]/g, '');
+
+    // Noise line patterns (mirrors server-side noisePatterns)
+    const NOISE = [
+      /^\s*❯/,
+      /Claude Code v[\d.]+/,
+      /(?:Sonnet|Opus|Haiku).*·/,
+      /▐▛|▝▜|▘▘/,
+      /[✻✽✢✶✸]/,
+      /^\s*[*·] \S[\S ]*[….]? \(\d+[ms]/,
+      /^\s*[*·] [A-Z]\S*ing[\.…]?(\s*\(\d[^)]*\))?\s*$/,
+      /⏵⏵ bypass permissions/,
+      /^─{5,}/,
+      /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,
+      /\b(low|medium|high)\s*·\s*\/effort/,
+      /^\s*⎿/,
+      /^\s+(?:Read|Ran|Listed|Wrote|Written|Edited|Created|Deleted|Fetched|Searched|Committed|Updated|Removed|Copied|Moved)\s+\d/,
+      /^\s+Committed\s+[0-9a-f]{6,}/,
+      /ctrl\+b.*background/,
+      /\/clear to start fresh/,
+      /^\s+(?:Fetch|Web Search|WebSearch)\(/,
+      /^\s{2,}[A-Z][a-z]+ing (?:for )?\d/,
+      /^main\s{5,}/,
+      /◯\s+general-purpose/,
+      /↑\/↓ to select/,
+      /·\s*↓\s*\d+\.?\d*k tokens/,
+      /%\s*until auto-compact/,
+    ];
+
+    const lines = clean.split('\n');
+    const kept = [];
+    let inBlock = false; // inside a ● response block
+
+    for (const line of lines) {
+      const isResponseStart = /^\s*●\s/.test(line);
+      const isPrompt = /^❯/.test(line);
+      const isSep = /^─{5,}/.test(line);
+      const isNoise = NOISE.some(p => p.test(line));
+
+      if (isResponseStart) {
+        inBlock = true;
+        const text = line.replace(/^\s*●\s*/, '').replace(/\s*…\s*\(\d[^)]*\)\s*$/, '');
+        // Skip tool call headers and feedback prompts
+        if (/^(?:[A-Z][a-zA-Z]+[·(]|How is Claude doing)/.test(text) || /^main\s{5,}/.test(text)) {
+          inBlock = false;
+        } else if (text.trim()) {
+          kept.push('', '---', text);
+        }
+        continue;
+      }
+      if (isPrompt || isSep) { inBlock = false; continue; }
+      if (!inBlock) continue;
+      if (isNoise) continue;
+      const cleaned = line.replace(/\s*…\s*\(\d[^)]*\)\s*$/, '');
+      kept.push(cleaned);
+    }
+
+    // Render each kept line through the existing markdown renderer
+    const html = kept.map(line => {
+      if (line === '---') return '<hr class="md-sep">';
+      if (line === '') return '';
+      return renderMarkdown(line);
+    }).join('\n');
+
+    el.innerHTML = `<div class="md-content">${html}</div>`;
+    if (atBottom) c.scrollTop = c.scrollHeight;
   }
 
   // --- Questionnaire banner ---
@@ -347,7 +443,7 @@
     input.style.height = 'auto';
 
     // Optimistic: add user bubble immediately
-    if (chatMode) {
+    if (viewMode === 'chat') {
       conversation.push({ role: 'user', text });
       renderChat();
     }
