@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="/style.css?v=20260702-3">
+  <link rel="stylesheet" href="/style.css?v=20260810-1">
 </head>
 <body>
   <div id="app">
@@ -71,11 +71,14 @@
 
       <div id="output-container">
         <div id="chat-view"></div>
+        <div id="jsonl-view" class="hidden"></div>
         <div id="markdown-view" class="hidden"></div>
         <pre id="output" class="hidden"></pre>
       </div>
 
       <div id="input-bar">
+        <button id="upload-btn" class="icon-btn" title="Upload file">📎</button>
+        <input id="upload-input" type="file" multiple style="display:none">
         <textarea id="input-text" rows="1" placeholder="Message… (Ctrl+Enter to send)" enterkeyhint="enter"></textarea>
         <button id="send-btn">Send</button>
       </div>
@@ -125,6 +128,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=20260702-3"></script>
+  <script src="/app.js?v=20260810-2"></script>
 </body>
 </html>

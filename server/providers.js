@@ -177,7 +177,15 @@ export const PROVIDERS = {
     icon: '🟣',
     // --dangerously-skip-permissions disables interactive permission prompts so
     // the session behaves like Codex's -a untrusted mode (approvals via our UI).
-    launch: (task) => task ? `claude --dangerously-skip-permissions "${esc(task)}"` : `claude --dangerously-skip-permissions`,
+    // Strip Claude Code host-mode env vars that leak from the tmux server environment
+    // (set when the tmux server itself was started inside a Claude Code session).
+    // CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1 makes Claude expect an external host to
+    // supply auth tokens — without unsetting it, new sessions show "Not logged in".
+    launch: (task) => {
+      const cleanEnv = 'env -u CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST -u CLAUDECODE -u CLAUDE_SSH_DAEMON_CHILD -u ANTHROPIC_API_KEY';
+      const cmd = task ? `claude --dangerously-skip-permissions "${esc(task)}"` : `claude --dangerously-skip-permissions`;
+      return `${cleanEnv} ${cmd}`;
+    },
     resumePattern: /claude --resume ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/,
     extractResponses: extractClaudeResponses,
     approvalPatterns: [

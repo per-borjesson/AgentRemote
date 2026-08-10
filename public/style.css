@@ -456,6 +456,19 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   cursor: pointer;
   font-family: inherit;
 }
+/* JSONL native view */
+.jsonl-unavail { color: var(--muted); font-size: .85rem; padding: 2rem 1rem; text-align: center; }
+.jsonl-status { color: var(--muted); font-size: .85rem; padding: .5rem 1rem 1rem; font-style: italic; }
+.jsonl-tools { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .4rem; }
+.jsonl-tool {
+  font-size: .72rem;
+  padding: .15rem .45rem;
+  border-radius: 6px;
+  background: rgba(201,100,66,.15);
+  color: var(--accent);
+  font-family: ui-monospace, monospace;
+}
+
 .sheet-cancel {
   padding: .75rem;
   border: 1px solid var(--border);

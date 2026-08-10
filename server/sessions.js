@@ -114,7 +114,7 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
   const dir = workdir || `${process.env.HOME}/agents/${name}`;
   execSync(`mkdir -p ${JSON.stringify(dir)}`);
   try {
-    tmux('new-session', '-d', '-s', name, '-c', dir, '-x', '220', '-y', '50');
+    tmux('new-session', '-d', '-s', name, '-c', dir, '-x', '220', '-y', '200');
   } catch (e) {
     if (!e.message.includes('duplicate session')) throw e;
   }
@@ -279,7 +279,7 @@ export function setSessionStatus(name, status) {
   sessionMeta.set(name, meta);
 }
 
-export function checkTmuxSizes(minWidth = 220, minHeight = 50) {
+export function checkTmuxSizes(minWidth = 220, minHeight = 200) {
   try {
     const raw = execSync(
       `tmux list-windows -a -F '#{session_name} #{window_width}x#{window_height}'`,

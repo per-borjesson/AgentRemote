@@ -3,8 +3,10 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { existsSync, readdirSync, statSync } from 'fs';
+import { dirname, join, basename } from 'path';
+import { existsSync, readdirSync, statSync, mkdirSync } from 'fs';
+import { execSync } from 'child_process';
+import multer from 'multer';
 import {
   listSessions, getSession, createSession, sendKeys,
   captureOutput, killSession, checkForApprovalPrompt,
@@ -14,8 +16,20 @@ import {
 } from './sessions.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
+import { readJsonlConversation } from './jsonl.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function resolveWorkdir(session) {
+  if (!session) return null;
+  if (session.workdir) return session.workdir;
+  try {
+    return execSync(
+      `tmux display-message -p -t ${session.name} '#{pane_current_path}'`,
+      { encoding: 'utf8' }
+    ).trim() || null;
+  } catch { return null; }
+}
 const PORT = process.env.PORT || 3000;
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
 const VERSION = '20260523-3';
@@ -58,7 +72,9 @@ app.get('/api/sessions/:name/output', (req, res) => {
   const lines = parseInt(req.query.lines) || 100;
   const output = captureOutput(req.params.name, lines);
   const conversation = conversations.get(req.params.name) || [];
-  res.json({ output, conversation });
+  const session = getSession(req.params.name);
+  const jsonl = session?.provider === 'claude' ? readJsonlConversation(resolveWorkdir(session)) : null;
+  res.json({ output, conversation, jsonl });
 });
 
 app.post('/api/sessions/:name/input', (req, res) => {
@@ -105,6 +121,45 @@ app.get('/api/agents', (req, res) => {
       });
   } catch {}
   res.json(dirs);
+});
+
+// File upload — store in <workdir>/uploads/, return the path
+const upload = multer({
+  storage: multer.diskStorage({
+    destination(req, file, cb) {
+      const session = getSession(req.params.name);
+      if (!session) return cb(new Error('session not found'));
+      if (!session.workdir) {
+        try {
+          session.workdir = execSync(
+            `tmux display-message -p -t ${req.params.name} '#{pane_current_path}'`,
+            { encoding: 'utf8' }
+          ).trim();
+        } catch {
+          return cb(new Error('session has no workdir'));
+        }
+      }
+      const dir = join(session.workdir, 'uploads');
+      mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename(req, file, cb) {
+      // Sanitise: keep only safe filename characters
+      const safe = basename(file.originalname).replace(/[^a-zA-Z0-9._\-]/g, '_');
+      cb(null, safe);
+    },
+  }),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+});
+
+app.post('/api/sessions/:name/upload', (req, res, next) => {
+  upload.single('file')(req, res, err => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'no file' });
+    const absPath = join(req.file.destination, req.file.filename);
+    const relPath = `uploads/${req.file.filename}`;
+    res.json({ filename: req.file.filename, path: absPath, relPath });
+  });
 });
 
 app.delete('/api/sessions/:name', (req, res) => {
@@ -161,9 +216,14 @@ function mergeResponses(name, incoming) {
   const stored = storedResponses.get(name) || [];
   for (const resp of incoming) {
     const last = stored.length > 0 ? stored[stored.length - 1] : null;
-    if (last && last.length >= 20 && resp.length > last.length && resp.startsWith(last.slice(0, Math.min(80, last.length)))) {
-      stored[stored.length - 1] = resp;
-    } else if (!stored.includes(resp)) {
+    if (last && last.length >= 20 && resp.length >= 20) {
+      const anchor = Math.min(80, last.length, resp.length);
+      if (last.slice(0, anchor) === resp.slice(0, anchor)) {
+        if (resp.length > last.length) stored[stored.length - 1] = resp;
+        continue;
+      }
+    }
+    if (!stored.includes(resp)) {
       stored.push(resp);
     }
   }
@@ -180,9 +240,17 @@ function mergeConversation(name, incoming, provider) {
     if (!text) continue;
     const lastAIIdx = conv.reduce((idx, e, i) => e.role === 'ai' ? i : idx, -1);
     const lastAI = lastAIIdx >= 0 ? conv[lastAIIdx] : null;
-    if (lastAI && lastAI.text.length >= 20 && text.length > lastAI.text.length && text.startsWith(lastAI.text.slice(0, Math.min(80, lastAI.text.length)))) {
-      conv[lastAIIdx] = { role: 'ai', text, ts: lastAI.ts || Date.now() };
-    } else if (!conv.some(e => e.role === 'ai' && e.text === text)) {
+    if (lastAI && lastAI.text.length >= 20 && text.length >= 20) {
+      const anchor = Math.min(80, lastAI.text.length, text.length);
+      if (lastAI.text.slice(0, anchor) === text.slice(0, anchor)) {
+        // Same block — keep the longer version, discard the shorter
+        if (text.length > lastAI.text.length) {
+          conv[lastAIIdx] = { role: 'ai', text, ts: lastAI.ts || Date.now() };
+        }
+        continue;
+      }
+    }
+    if (!conv.some(e => e.role === 'ai' && e.text === text)) {
       conv.push({ role: 'ai', text, ts: Date.now() });
     }
   }
@@ -204,9 +272,9 @@ setInterval(() => {
     const prov = getProvider(session.provider);
     const isWatched = [...clients].some(c => c.readyState === 1 && c._watchSession === session.name);
 
-    // Single capture per session per cycle — 300 lines for watched sessions
-    // (streaming), 50 lines for unwatched (approval/resume checks only).
-    const output = captureOutput(session.name, isWatched ? 300 : 50);
+    // Single capture per session per cycle — 500 lines for watched sessions
+    // (pane height 200 + buffer), 50 lines for unwatched (approval/resume checks only).
+    const output = captureOutput(session.name, isWatched ? 500 : 50);
 
     // Stream output to subscribed clients (only when someone is watching)
     if (isWatched) {
@@ -214,9 +282,10 @@ setInterval(() => {
       mergeResponses(session.name, incoming);
       const conversation = mergeConversation(session.name, incoming, prov);
       const questionnaire = parseQuestionnaire(output);
+      const jsonl = session.provider === 'claude' ? readJsonlConversation(resolveWorkdir(session)) : null;
       for (const client of clients) {
         if (client.readyState === 1 && client._watchSession === session.name) {
-          client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation, questionnaire: questionnaire || null }));
+          client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation, questionnaire: questionnaire || null, jsonl }));
         }
       }
     }

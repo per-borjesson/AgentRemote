@@ -9,6 +9,7 @@
   let lastChatKey = '';
   let lastMarkdownKey = '';
   let lastOutputText = '';
+  let lastJsonlData = null;
 
   // --- Screens ---
   const screens = {
@@ -84,6 +85,7 @@
         conversation = [...msg.conversation, ...pending];
         if (viewMode === 'chat') renderChat();
       }
+      if (msg.jsonl) { lastJsonlData = msg.jsonl; if (viewMode === 'jsonl') renderJsonlView(msg.jsonl); }
       if (viewMode === 'markdown') renderMarkdownView(msg.output);
       renderOutput(msg.output);
       if (msg.questionnaire) showQuestionnaireBanner(msg.questionnaire);
@@ -163,10 +165,12 @@
     const wdEl = document.getElementById('session-workdir');
     if (wdEl) wdEl.textContent = session?.workdir || '';
     document.getElementById('chat-view').innerHTML = '';
+    document.getElementById('jsonl-view').innerHTML = '';
     document.getElementById('markdown-view').innerHTML = '';
     document.getElementById('output').textContent = '';
+    lastJsonlData = null;
     showScreen('session');
-    setViewMode('chat');
+    setViewMode('jsonl');
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'subscribe_output', session: name }));
@@ -187,30 +191,33 @@
   }
 
   async function fetchOutput(name) {
-    const res = await api('GET', `/api/sessions/${name}/output?lines=300`);
+    const res = await api('GET', `/api/sessions/${name}/output?lines=500`);
     if (!res) return;
     if (res.conversation) {
       conversation = res.conversation;
       if (viewMode === 'chat') renderChat();
     }
+    if (res.jsonl) { lastJsonlData = res.jsonl; if (viewMode === 'jsonl') renderJsonlView(res.jsonl); }
     if (viewMode === 'markdown') renderMarkdownView(res.output);
     renderOutput(res.output);
   }
 
   // --- View mode: chat | markdown | terminal ---
-  const VIEW_CYCLE = ['chat', 'markdown', 'terminal'];
-  const VIEW_ICONS = { chat: '⌨', markdown: 'M↓', terminal: '💬' };
-  const VIEW_TITLES = { chat: 'Switch to markdown view', markdown: 'Switch to terminal view', terminal: 'Switch to chat view' };
+  const VIEW_CYCLE = ['chat', 'jsonl', 'markdown', 'terminal'];
+  const VIEW_ICONS = { chat: '⌨', jsonl: '✦', markdown: 'M↓', terminal: '💬' };
+  const VIEW_TITLES = { chat: 'Switch to native view', jsonl: 'Switch to markdown view', markdown: 'Switch to terminal view', terminal: 'Switch to chat view' };
 
   function setViewMode(mode) {
     viewMode = mode;
     document.getElementById('chat-view').classList.toggle('hidden', mode !== 'chat');
+    document.getElementById('jsonl-view').classList.toggle('hidden', mode !== 'jsonl');
     document.getElementById('markdown-view').classList.toggle('hidden', mode !== 'markdown');
     document.getElementById('output').classList.toggle('hidden', mode !== 'terminal');
     const btn = document.getElementById('view-toggle-btn');
     btn.textContent = VIEW_ICONS[mode];
     btn.title = VIEW_TITLES[mode];
     if (mode === 'chat') renderChat();
+    if (mode === 'jsonl') renderJsonlView(lastJsonlData);
     if (mode === 'markdown' && lastOutputText) renderMarkdownView(lastOutputText);
   }
 
@@ -364,6 +371,46 @@
     if (atBottom) c.scrollTop = c.scrollHeight;
   }
 
+  // --- JSONL view (native Claude conversation from ~/.claude/projects/) ---
+  function renderJsonlView(data) {
+    const el = document.getElementById('jsonl-view');
+
+    // Skip re-render while user has text selected inside this view — avoids
+    // the 2-second polling loop destroying the selection mid-copy.
+    const sel = window.getSelection();
+    if (sel && sel.toString().length > 0 && el.contains(sel.anchorNode)) return;
+
+    const c = document.getElementById('output-container');
+    const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
+
+    if (!data) {
+      el.innerHTML = '<div class="jsonl-unavail">No JSONL data — Claude sessions only</div>';
+      return;
+    }
+
+    const { conv, status } = data;
+
+    const bubbles = conv.map(entry => {
+      const ts = entry.ts ? `<span class="bubble-time">${formatMsgTime(entry.ts)}</span>` : '';
+      if (entry.role === 'user') {
+        return `<div class="bubble user"><div class="bubble-text">${esc(entry.text)}${ts}</div></div>`;
+      }
+      const toolsHtml = entry.tools?.length
+        ? `<div class="jsonl-tools">${entry.tools.map(t => `<span class="jsonl-tool">${esc(t.name)}</span>`).join('')}</div>`
+        : '';
+      return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}${toolsHtml}${ts}</div></div>`;
+    }).join('');
+
+    const statusHtml = status === 'thinking'
+      ? '<div class="jsonl-status">Thinking…</div>'
+      : status === 'working'
+        ? '<div class="jsonl-status">Working…</div>'
+        : '';
+
+    el.innerHTML = bubbles + statusHtml;
+    if (atBottom) c.scrollTop = c.scrollHeight;
+  }
+
   // --- Questionnaire banner ---
   const qBanner = document.getElementById('questionnaire-banner');
   const qQuestion = document.getElementById('questionnaire-question');
@@ -464,6 +511,55 @@
 
     await api('POST', `/api/sessions/${currentSession}/input`, { text, enter: true });
   }
+
+  // --- File upload ---
+  const uploadBtn = document.getElementById('upload-btn');
+  const uploadInput = document.getElementById('upload-input');
+
+  uploadBtn.addEventListener('click', () => {
+    if (!currentSession) return;
+    uploadInput.click();
+  });
+
+  uploadInput.addEventListener('change', async () => {
+    const files = [...uploadInput.files];
+    if (!files.length) return;
+    uploadInput.value = '';
+
+    const paths = [];
+    const errors = [];
+    for (const file of files) {
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const res = await fetch(`/api/sessions/${currentSession}/upload`, {
+          method: 'POST',
+          headers: { 'x-token': token },
+          body: form,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          paths.push(data.path);
+        } else {
+          const data = await res.json().catch(() => ({}));
+          errors.push(`${file.name}: ${data.error || res.status}`);
+        }
+      } catch (err) {
+        errors.push(`${file.name}: network error`);
+      }
+    }
+
+    if (errors.length) {
+      alert('Upload failed:\n' + errors.join('\n'));
+    }
+
+    const input = document.getElementById('input-text');
+    const sep = input.value.trim() ? '\n' : '';
+    input.value = input.value.trimEnd() + sep + paths.join('\n');
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+    input.focus();
+  });
 
   // --- Kill session ---
   const killSheet = document.getElementById('kill-sheet');
