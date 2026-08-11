@@ -17,6 +17,7 @@ import {
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
 import { readJsonlConversation } from './jsonl.js';
+import { getSettings, saveSection, saveCustom, deleteCustom, testTelegram, testEmail, startClaudeLogin, getClaudeStatus } from './settings.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -160,6 +161,40 @@ app.post('/api/sessions/:name/upload', (req, res, next) => {
     const relPath = `uploads/${req.file.filename}`;
     res.json({ filename: req.file.filename, path: absPath, relPath });
   });
+});
+
+// Settings — specific routes before general /:section
+app.get('/api/settings', (req, res) => res.json(getSettings()));
+app.get('/api/settings/claude/status', (req, res) => res.json(getClaudeStatus()));
+
+app.post('/api/settings/claude/login', async (req, res) => {
+  try { res.json(await startClaudeLogin()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/settings/telegram/test', async (req, res) => {
+  try { res.json({ ok: true, message: await testTelegram() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/settings/email/test', async (req, res) => {
+  try { res.json({ ok: true, message: await testEmail() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/settings/custom', (req, res) => {
+  try { saveCustom(req.body.name, req.body.value); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/settings/custom/:name', (req, res) => {
+  deleteCustom(req.params.name);
+  res.json({ ok: true });
+});
+
+app.post('/api/settings/:section', (req, res) => {
+  try { saveSection(req.params.section, req.body); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.delete('/api/sessions/:name', (req, res) => {

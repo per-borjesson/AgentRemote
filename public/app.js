@@ -19,8 +19,8 @@
   };
 
   function showScreen(name) {
-    Object.values(screens).forEach(s => s.classList.add('hidden'));
-    screens[name].classList.remove('hidden');
+    Object.values(screens).forEach(s => { if (s) s.classList.add('hidden'); });
+    if (screens[name]) screens[name].classList.remove('hidden');
   }
 
   // --- Auth ---
@@ -590,7 +590,9 @@
   document.getElementById('back-btn').addEventListener('click', () => history.back());
 
   window.addEventListener('popstate', (e) => {
-    if (e.state?.screen === 'main' && currentSession) {
+    if (e.state?.screen === 'settings') {
+      showScreen('settings');
+    } else if (e.state?.screen === 'main') {
       currentSession = null;
       showScreen('main');
       refreshSessions();
@@ -757,6 +759,218 @@
       fetchOutput(currentSession);
     }
     if (currentSession === null) refreshSessions();
+  });
+
+  // --- Settings screen ---
+  screens.settings = document.getElementById('settings-screen');
+
+  document.getElementById('settings-btn').addEventListener('click', openSettings);
+  document.getElementById('settings-back-btn').addEventListener('click', () => {
+    history.back();
+  });
+
+  async function openSettings() {
+    history.pushState({ screen: 'settings' }, '');
+    showScreen('settings');
+    const data = await api('GET', '/api/settings');
+    if (data) renderSettings(data);
+  }
+
+  function setBadge(id, configured, label) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = configured ? '✓ ' + label : 'Not configured';
+    el.className = 'sc-badge' + (configured ? ' ok' : '');
+  }
+
+  function showMsg(id, text, isErr) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'sc-msg' + (isErr ? ' err' : ' ok');
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 4000);
+  }
+
+  function renderSettings(d) {
+    // Claude
+    const claude = d.claude;
+    const claudeBadge = document.getElementById('sc-claude-badge');
+    const claudeStatus = document.getElementById('sc-claude-status');
+    const claudeBtn = document.getElementById('claude-login-btn');
+    if (claude.configured) {
+      claudeBadge.textContent = '✓ Connected';
+      claudeBadge.className = 'sc-badge ok';
+      claudeStatus.textContent = (claude.email || '') + (claude.expiresIn ? ` · token expires in ${claude.expiresIn} min` : '');
+      claudeBtn.textContent = 'Re-authenticate';
+    } else {
+      claudeBadge.textContent = 'Not connected';
+      claudeBadge.className = 'sc-badge';
+      claudeStatus.textContent = '';
+      claudeBtn.textContent = 'Login with Claude.ai';
+    }
+
+    // Telegram
+    setBadge('sc-telegram-badge', d.telegram.configured, 'Connected');
+    if (d.telegram.botToken) document.getElementById('tg-token').value = d.telegram.botToken;
+    if (d.telegram.chatId) document.getElementById('tg-chatid').value = d.telegram.chatId;
+
+    // Email
+    setBadge('sc-email-badge', d.email.configured, d.email.address || 'Connected');
+    if (d.email.address) document.getElementById('em-address').value = d.email.address;
+    if (d.email.appPassword) document.getElementById('em-password').value = d.email.appPassword;
+
+    // GitHub
+    setBadge('sc-github-badge', d.github.configured, 'Connected');
+    if (d.github.token) document.getElementById('gh-token').value = d.github.token;
+
+    // OpenAI
+    setBadge('sc-openai-badge', d.openai.configured, 'Connected');
+    if (d.openai.key) document.getElementById('oa-key').value = d.openai.key;
+
+    // HubSpot
+    setBadge('sc-hubspot-badge', d.hubspot.configured, 'Connected');
+    if (d.hubspot.token) document.getElementById('hs-token').value = d.hubspot.token;
+
+    // Stripe
+    setBadge('sc-stripe-badge', d.stripe.configured, 'Connected');
+    if (d.stripe.key) document.getElementById('st-key').value = d.stripe.key;
+
+    // Custom
+    renderCustomList(d.custom);
+
+    // About
+    const vEl = document.getElementById('sc-version');
+    if (vEl) vEl.textContent = document.getElementById('server-version')?.textContent || '';
+    const tokEl = document.getElementById('sc-token-display');
+    if (tokEl) tokEl.textContent = token.slice(0, 4) + '••••••••' + token.slice(-4);
+  }
+
+  function renderCustomList(items) {
+    const el = document.getElementById('custom-list');
+    if (!el) return;
+    if (!items.length) { el.innerHTML = ''; return; }
+    el.innerHTML = items.map(item => `
+      <div class="custom-row">
+        <span class="custom-name">${esc(item.name)}</span>
+        <span class="custom-val">${esc(item.masked)}</span>
+        <button class="sc-btn danger custom-del" data-name="${esc(item.name)}">✕</button>
+      </div>
+    `).join('');
+    el.querySelectorAll('.custom-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await api('DELETE', `/api/settings/custom/${encodeURIComponent(btn.dataset.name)}`);
+        const data = await api('GET', '/api/settings');
+        if (data) renderCustomList(data.custom);
+      });
+    });
+  }
+
+  // Claude login
+  let claudePollTimer = null;
+  document.getElementById('claude-login-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('claude-login-btn');
+    const urlEl = document.getElementById('claude-login-url');
+    const hint = document.getElementById('claude-login-hint');
+    btn.disabled = true;
+    btn.textContent = 'Getting login URL…';
+    urlEl.classList.add('hidden');
+    hint.textContent = '';
+    const res = await api('POST', '/api/settings/claude/login');
+    btn.disabled = false;
+    if (!res || res.error) {
+      btn.textContent = 'Login with Claude.ai';
+      hint.textContent = res?.error || 'Failed to start login';
+      return;
+    }
+    btn.textContent = 'Waiting for login…';
+    urlEl.href = res.url;
+    urlEl.classList.remove('hidden');
+    hint.textContent = 'Open the link above, log in, then return here.';
+
+    if (claudePollTimer) clearInterval(claudePollTimer);
+    claudePollTimer = setInterval(async () => {
+      const status = await api('GET', '/api/settings/claude/status');
+      if (status?.configured) {
+        clearInterval(claudePollTimer);
+        claudePollTimer = null;
+        const data = await api('GET', '/api/settings');
+        if (data) renderSettings(data);
+        urlEl.classList.add('hidden');
+        hint.textContent = '';
+      }
+    }, 2000);
+  });
+
+  // Telegram
+  document.getElementById('tg-save').addEventListener('click', async () => {
+    const res = await api('POST', '/api/settings/telegram', {
+      botToken: document.getElementById('tg-token').value,
+      chatId: document.getElementById('tg-chatid').value,
+    });
+    showMsg('tg-msg', res?.error || 'Saved', !!res?.error);
+    if (!res?.error) setBadge('sc-telegram-badge', true, 'Connected');
+  });
+  document.getElementById('tg-test').addEventListener('click', async () => {
+    showMsg('tg-msg', 'Sending…', false);
+    const res = await api('POST', '/api/settings/telegram/test');
+    showMsg('tg-msg', res?.error || res?.message || 'Sent', !!res?.error);
+  });
+
+  // Email
+  document.getElementById('em-save').addEventListener('click', async () => {
+    const res = await api('POST', '/api/settings/email', {
+      address: document.getElementById('em-address').value,
+      appPassword: document.getElementById('em-password').value,
+    });
+    showMsg('em-msg', res?.error || 'Saved', !!res?.error);
+    if (!res?.error) setBadge('sc-email-badge', true, document.getElementById('em-address').value);
+  });
+  document.getElementById('em-test').addEventListener('click', async () => {
+    showMsg('em-msg', 'Testing connection…', false);
+    const res = await api('POST', '/api/settings/email/test');
+    showMsg('em-msg', res?.error || res?.message || 'OK', !!res?.error);
+  });
+
+  // GitHub
+  document.getElementById('gh-save').addEventListener('click', async () => {
+    const res = await api('POST', '/api/settings/github', { token: document.getElementById('gh-token').value });
+    showMsg('gh-msg', res?.error || 'Saved', !!res?.error);
+    if (!res?.error) setBadge('sc-github-badge', true, 'Connected');
+  });
+
+  // OpenAI
+  document.getElementById('oa-save').addEventListener('click', async () => {
+    const res = await api('POST', '/api/settings/openai', { key: document.getElementById('oa-key').value });
+    showMsg('oa-msg', res?.error || 'Saved', !!res?.error);
+    if (!res?.error) setBadge('sc-openai-badge', true, 'Connected');
+  });
+
+  // HubSpot
+  document.getElementById('hs-save').addEventListener('click', async () => {
+    const res = await api('POST', '/api/settings/hubspot', { token: document.getElementById('hs-token').value });
+    showMsg('hs-msg', res?.error || 'Saved', !!res?.error);
+    if (!res?.error) setBadge('sc-hubspot-badge', true, 'Connected');
+  });
+
+  // Stripe
+  document.getElementById('st-save').addEventListener('click', async () => {
+    const res = await api('POST', '/api/settings/stripe', { key: document.getElementById('st-key').value });
+    showMsg('st-msg', res?.error || 'Saved', !!res?.error);
+    if (!res?.error) setBadge('sc-stripe-badge', true, 'Connected');
+  });
+
+  // Custom
+  document.getElementById('custom-add').addEventListener('click', async () => {
+    const name = document.getElementById('custom-name').value.trim();
+    const value = document.getElementById('custom-value').value.trim();
+    const res = await api('POST', '/api/settings/custom', { name, value });
+    if (res?.error) { showMsg('custom-msg', res.error, true); return; }
+    document.getElementById('custom-name').value = '';
+    document.getElementById('custom-value').value = '';
+    showMsg('custom-msg', 'Saved', false);
+    const data = await api('GET', '/api/settings');
+    if (data) renderCustomList(data.custom);
   });
 
   if ('serviceWorker' in navigator) {

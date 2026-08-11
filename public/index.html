@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="/style.css?v=20260810-1">
+  <link rel="stylesheet" href="/style.css?v=20260811-2">
 </head>
 <body>
   <div id="app">
@@ -30,6 +30,7 @@
         <button id="install-btn" class="icon-btn hidden" title="Install app">⬇</button>
         <button id="load-session-btn" class="icon-btn" title="Load workspace">📂</button>
         <button id="new-session-btn" class="icon-btn" title="New session">+</button>
+        <button id="settings-btn" class="icon-btn" title="Settings">⚙</button>
       </header>
 
       <div id="session-list"></div>
@@ -101,6 +102,151 @@
       </div>
     </div>
 
+    <div id="settings-screen" class="screen hidden">
+      <header>
+        <button id="settings-back-btn" class="icon-btn">←</button>
+        <div class="header-title"><h1>Settings</h1></div>
+      </header>
+      <div id="settings-content">
+
+        <div class="sc-group-title">Essential</div>
+
+        <div class="sc-card" id="sc-claude">
+          <div class="sc-head">
+            <span class="sc-icon">🟣</span>
+            <span class="sc-title">Claude</span>
+            <span class="sc-badge" id="sc-claude-badge">Not connected</span>
+          </div>
+          <div class="sc-body">
+            <p class="sc-status" id="sc-claude-status"></p>
+            <button class="sc-btn primary" id="claude-login-btn">Login with Claude.ai</button>
+            <a class="sc-url hidden" id="claude-login-url" target="_blank">Open login page →</a>
+            <p class="sc-hint" id="claude-login-hint"></p>
+          </div>
+        </div>
+
+        <div class="sc-card" id="sc-telegram">
+          <div class="sc-head">
+            <span class="sc-icon">✈️</span>
+            <span class="sc-title">Telegram</span>
+            <span class="sc-badge" id="sc-telegram-badge">Not configured</span>
+          </div>
+          <div class="sc-body">
+            <input class="sc-input" id="tg-token" type="password" placeholder="Bot token (from @BotFather)">
+            <input class="sc-input" id="tg-chatid" type="text" placeholder="Your chat ID">
+            <p class="sc-hint">Get a bot token from <a href="https://t.me/BotFather" target="_blank">@BotFather</a>. Find your chat ID by messaging <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>.</p>
+            <div class="sc-actions">
+              <button class="sc-btn" id="tg-save">Save</button>
+              <button class="sc-btn" id="tg-test">Send test</button>
+            </div>
+            <p class="sc-msg hidden" id="tg-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-card" id="sc-email">
+          <div class="sc-head">
+            <span class="sc-icon">✉️</span>
+            <span class="sc-title">Email (Gmail)</span>
+            <span class="sc-badge" id="sc-email-badge">Not configured</span>
+          </div>
+          <div class="sc-body">
+            <input class="sc-input" id="em-address" type="email" placeholder="Gmail address">
+            <input class="sc-input" id="em-password" type="password" placeholder="App password">
+            <p class="sc-hint">Use a <a href="https://myaccount.google.com/apppasswords" target="_blank">Google App Password</a> — not your account password. Requires 2FA enabled.</p>
+            <div class="sc-actions">
+              <button class="sc-btn" id="em-save">Save</button>
+              <button class="sc-btn" id="em-test">Test connection</button>
+            </div>
+            <p class="sc-msg hidden" id="em-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-group-title">Developer</div>
+
+        <div class="sc-card">
+          <div class="sc-head">
+            <span class="sc-icon">🐙</span>
+            <span class="sc-title">GitHub</span>
+            <span class="sc-badge" id="sc-github-badge">Not configured</span>
+          </div>
+          <div class="sc-body">
+            <input class="sc-input" id="gh-token" type="password" placeholder="Personal access token">
+            <p class="sc-hint">Create at <a href="https://github.com/settings/tokens" target="_blank">github.com → Settings → Tokens</a>.</p>
+            <div class="sc-actions"><button class="sc-btn" id="gh-save">Save</button></div>
+            <p class="sc-msg hidden" id="gh-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-card">
+          <div class="sc-head">
+            <span class="sc-icon">⚡</span>
+            <span class="sc-title">OpenAI</span>
+            <span class="sc-badge" id="sc-openai-badge">Not configured</span>
+          </div>
+          <div class="sc-body">
+            <input class="sc-input" id="oa-key" type="password" placeholder="API key (sk-...)">
+            <p class="sc-hint">Create at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>.</p>
+            <div class="sc-actions"><button class="sc-btn" id="oa-save">Save</button></div>
+            <p class="sc-msg hidden" id="oa-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-group-title">Marketing</div>
+
+        <div class="sc-card">
+          <div class="sc-head">
+            <span class="sc-icon">🟠</span>
+            <span class="sc-title">HubSpot</span>
+            <span class="sc-badge" id="sc-hubspot-badge">Not configured</span>
+          </div>
+          <div class="sc-body">
+            <input class="sc-input" id="hs-token" type="password" placeholder="Private app token">
+            <p class="sc-hint">Create at HubSpot → Settings → Integrations → Private Apps.</p>
+            <div class="sc-actions"><button class="sc-btn" id="hs-save">Save</button></div>
+            <p class="sc-msg hidden" id="hs-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-card">
+          <div class="sc-head">
+            <span class="sc-icon">💳</span>
+            <span class="sc-title">Stripe</span>
+            <span class="sc-badge" id="sc-stripe-badge">Not configured</span>
+          </div>
+          <div class="sc-body">
+            <input class="sc-input" id="st-key" type="password" placeholder="Secret key (sk_...)">
+            <p class="sc-hint">Find at <a href="https://dashboard.stripe.com/apikeys" target="_blank">dashboard.stripe.com → API keys</a>.</p>
+            <div class="sc-actions"><button class="sc-btn" id="st-save">Save</button></div>
+            <p class="sc-msg hidden" id="st-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-group-title">Custom credentials</div>
+
+        <div class="sc-card">
+          <div class="sc-body">
+            <div id="custom-list"></div>
+            <div class="sc-custom-add">
+              <input class="sc-input" id="custom-name" type="text" placeholder="Name (e.g. MY_API_KEY)">
+              <input class="sc-input" id="custom-value" type="password" placeholder="Value">
+              <div class="sc-actions"><button class="sc-btn primary" id="custom-add">Add</button></div>
+            </div>
+            <p class="sc-msg hidden" id="custom-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-group-title">About</div>
+        <div class="sc-card">
+          <div class="sc-body">
+            <p class="sc-hint">AgentRemote · <span id="sc-version"></span></p>
+            <p class="sc-hint">Auth token: <code id="sc-token-display"></code></p>
+            <p class="sc-hint">To rotate the token, edit <code>.env</code> and restart the service.</p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <div id="load-session-modal" class="modal hidden">
       <div class="modal-box">
         <h2>Load Workspace</h2>
@@ -128,6 +274,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=20260811-1"></script>
+  <script src="/app.js?v=20260811-2"></script>
 </body>
 </html>
