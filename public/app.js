@@ -508,6 +508,10 @@
       conversation.push({ role: 'user', text });
       renderChat();
     }
+    if (viewMode === 'jsonl' && lastJsonlData) {
+      const optimistic = { ...lastJsonlData, conv: [...lastJsonlData.conv, { role: 'user', text, ts: Date.now() }], status: 'thinking' };
+      renderJsonlView(optimistic);
+    }
 
     await api('POST', `/api/sessions/${currentSession}/input`, { text, enter: true });
   }
