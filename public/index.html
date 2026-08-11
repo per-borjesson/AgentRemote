@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="/style.css?v=20260811-2">
+  <link rel="stylesheet" href="/style.css?v=20260811-3">
 </head>
 <body>
   <div id="app">
@@ -109,9 +109,9 @@
       </header>
       <div id="settings-content">
 
-        <div class="sc-group-title">Essential</div>
+        <div class="sc-group-title">AI</div>
 
-        <div class="sc-card" id="sc-claude">
+        <div class="sc-card">
           <div class="sc-head">
             <span class="sc-icon">🟣</span>
             <span class="sc-title">Claude</span>
@@ -125,7 +125,54 @@
           </div>
         </div>
 
-        <div class="sc-card" id="sc-telegram">
+        <div class="sc-card">
+          <div class="sc-head">
+            <span class="sc-icon">⚡</span>
+            <span class="sc-title">OpenAI / Codex</span>
+            <span class="sc-badge" id="sc-openai-badge">Not configured</span>
+          </div>
+          <div class="sc-body">
+            <input class="sc-input" id="oa-key" type="password" placeholder="API key (sk-...)">
+            <p class="sc-hint">Used by both OpenAI API calls and the Codex CLI. Create at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>.</p>
+            <div class="sc-actions"><button class="sc-btn" id="oa-save">Save</button></div>
+            <p class="sc-msg hidden" id="oa-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-card">
+          <div class="sc-head">
+            <span class="sc-icon">✨</span>
+            <span class="sc-title">Gemini</span>
+            <span class="sc-badge" id="sc-gemini-badge">Not configured</span>
+          </div>
+          <div class="sc-body">
+            <input class="sc-input" id="gm-key" type="password" placeholder="API key">
+            <p class="sc-hint">Get a key at <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>.</p>
+            <div class="sc-actions"><button class="sc-btn" id="gm-save">Save</button></div>
+            <p class="sc-msg hidden" id="gm-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-card">
+          <div class="sc-head">
+            <span class="sc-icon">🤖</span>
+            <span class="sc-title">Custom AI providers</span>
+          </div>
+          <div class="sc-body">
+            <div id="ai-custom-list"></div>
+            <div class="sc-custom-add">
+              <input class="sc-input" id="ai-custom-name" type="text" placeholder="Name (e.g. Mistral, Groq)">
+              <input class="sc-input" id="ai-custom-baseurl" type="text" placeholder="Base URL (e.g. https://api.mistral.ai/v1)">
+              <input class="sc-input" id="ai-custom-key" type="password" placeholder="API key">
+              <div class="sc-actions"><button class="sc-btn primary" id="ai-custom-add">Add</button></div>
+            </div>
+            <p class="sc-msg hidden" id="ai-custom-msg"></p>
+          </div>
+        </div>
+
+        <div class="sc-group-title">Channels</div>
+
+        <div class="sc-card">
           <div class="sc-head">
             <span class="sc-icon">✈️</span>
             <span class="sc-title">Telegram</span>
@@ -143,7 +190,7 @@
           </div>
         </div>
 
-        <div class="sc-card" id="sc-email">
+        <div class="sc-card">
           <div class="sc-head">
             <span class="sc-icon">✉️</span>
             <span class="sc-title">Email (Gmail)</span>
@@ -161,7 +208,7 @@
           </div>
         </div>
 
-        <div class="sc-group-title">Developer</div>
+        <div class="sc-group-title">Integrations</div>
 
         <div class="sc-card">
           <div class="sc-head">
@@ -176,22 +223,6 @@
             <p class="sc-msg hidden" id="gh-msg"></p>
           </div>
         </div>
-
-        <div class="sc-card">
-          <div class="sc-head">
-            <span class="sc-icon">⚡</span>
-            <span class="sc-title">OpenAI</span>
-            <span class="sc-badge" id="sc-openai-badge">Not configured</span>
-          </div>
-          <div class="sc-body">
-            <input class="sc-input" id="oa-key" type="password" placeholder="API key (sk-...)">
-            <p class="sc-hint">Create at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>.</p>
-            <div class="sc-actions"><button class="sc-btn" id="oa-save">Save</button></div>
-            <p class="sc-msg hidden" id="oa-msg"></p>
-          </div>
-        </div>
-
-        <div class="sc-group-title">Marketing</div>
 
         <div class="sc-card">
           <div class="sc-head">
@@ -215,15 +246,17 @@
           </div>
           <div class="sc-body">
             <input class="sc-input" id="st-key" type="password" placeholder="Secret key (sk_...)">
-            <p class="sc-hint">Find at <a href="https://dashboard.stripe.com/apikeys" target="_blank">dashboard.stripe.com → API keys</a>.</p>
+            <p class="sc-hint">Lets agents query payments, create invoices, and manage subscriptions on your behalf. Find at <a href="https://dashboard.stripe.com/apikeys" target="_blank">dashboard.stripe.com → API keys</a>.</p>
             <div class="sc-actions"><button class="sc-btn" id="st-save">Save</button></div>
             <p class="sc-msg hidden" id="st-msg"></p>
           </div>
         </div>
 
-        <div class="sc-group-title">Custom credentials</div>
-
         <div class="sc-card">
+          <div class="sc-head">
+            <span class="sc-icon">🔑</span>
+            <span class="sc-title">Custom credentials</span>
+          </div>
           <div class="sc-body">
             <div id="custom-list"></div>
             <div class="sc-custom-add">
@@ -274,6 +307,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=20260811-2"></script>
+  <script src="/app.js?v=20260811-3"></script>
 </body>
 </html>

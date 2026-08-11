@@ -828,6 +828,13 @@
     setBadge('sc-openai-badge', d.openai.configured, 'Connected');
     if (d.openai.key) document.getElementById('oa-key').value = d.openai.key;
 
+    // Gemini
+    setBadge('sc-gemini-badge', d.gemini?.configured, 'Connected');
+    if (d.gemini?.key) document.getElementById('gm-key').value = d.gemini.key;
+
+    // Custom AI providers
+    renderAiCustomList(d.aiProviders || []);
+
     // HubSpot
     setBadge('sc-hubspot-badge', d.hubspot.configured, 'Connected');
     if (d.hubspot.token) document.getElementById('hs-token').value = d.hubspot.token;
@@ -849,19 +856,37 @@
   function renderCustomList(items) {
     const el = document.getElementById('custom-list');
     if (!el) return;
-    if (!items.length) { el.innerHTML = ''; return; }
-    el.innerHTML = items.map(item => `
+    el.innerHTML = items.length ? items.map(item => `
       <div class="custom-row">
         <span class="custom-name">${esc(item.name)}</span>
         <span class="custom-val">${esc(item.masked)}</span>
         <button class="sc-btn danger custom-del" data-name="${esc(item.name)}">✕</button>
       </div>
-    `).join('');
+    `).join('') : '';
     el.querySelectorAll('.custom-del').forEach(btn => {
       btn.addEventListener('click', async () => {
         await api('DELETE', `/api/settings/custom/${encodeURIComponent(btn.dataset.name)}`);
         const data = await api('GET', '/api/settings');
         if (data) renderCustomList(data.custom);
+      });
+    });
+  }
+
+  function renderAiCustomList(items) {
+    const el = document.getElementById('ai-custom-list');
+    if (!el) return;
+    el.innerHTML = items.length ? items.map(item => `
+      <div class="custom-row">
+        <span class="custom-name">${esc(item.name)}</span>
+        <span class="custom-val">${esc(item.baseUrl || '')}</span>
+        <button class="sc-btn danger ai-custom-del" data-name="${esc(item.name)}">✕</button>
+      </div>
+    `).join('') : '';
+    el.querySelectorAll('.ai-custom-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await api('DELETE', `/api/settings/ai-provider/${encodeURIComponent(btn.dataset.name)}`);
+        const data = await api('GET', '/api/settings');
+        if (data) renderAiCustomList(data.aiProviders || []);
       });
     });
   }
@@ -944,6 +969,29 @@
     const res = await api('POST', '/api/settings/openai', { key: document.getElementById('oa-key').value });
     showMsg('oa-msg', res?.error || 'Saved', !!res?.error);
     if (!res?.error) setBadge('sc-openai-badge', true, 'Connected');
+  });
+
+  // Gemini
+  document.getElementById('gm-save').addEventListener('click', async () => {
+    const res = await api('POST', '/api/settings/gemini', { key: document.getElementById('gm-key').value });
+    showMsg('gm-msg', res?.error || 'Saved', !!res?.error);
+    if (!res?.error) setBadge('sc-gemini-badge', true, 'Connected');
+  });
+
+  // Custom AI providers
+  document.getElementById('ai-custom-add').addEventListener('click', async () => {
+    const name = document.getElementById('ai-custom-name').value.trim();
+    const baseUrl = document.getElementById('ai-custom-baseurl').value.trim();
+    const key = document.getElementById('ai-custom-key').value.trim();
+    if (!name || !key) { showMsg('ai-custom-msg', 'Name and API key are required', true); return; }
+    const res = await api('POST', '/api/settings/ai-provider', { name, baseUrl, key });
+    if (res?.error) { showMsg('ai-custom-msg', res.error, true); return; }
+    document.getElementById('ai-custom-name').value = '';
+    document.getElementById('ai-custom-baseurl').value = '';
+    document.getElementById('ai-custom-key').value = '';
+    showMsg('ai-custom-msg', 'Saved', false);
+    const data = await api('GET', '/api/settings');
+    if (data) renderAiCustomList(data.aiProviders || []);
   });
 
   // HubSpot

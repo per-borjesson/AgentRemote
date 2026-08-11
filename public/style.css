@@ -486,10 +486,10 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   padding: .75rem;
   overflow-y: auto;
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: .6rem;
+  min-height: 0;
 }
+#settings-content > * { margin-bottom: .6rem; }
+#settings-content > *:last-child { margin-bottom: 0; }
 .sc-group-title {
   font-size: .72rem;
   font-weight: 600;

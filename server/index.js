@@ -17,7 +17,7 @@ import {
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
 import { readJsonlConversation } from './jsonl.js';
-import { getSettings, saveSection, saveCustom, deleteCustom, testTelegram, testEmail, startClaudeLogin, getClaudeStatus } from './settings.js';
+import { getSettings, saveSection, saveCustom, deleteCustom, saveAiProvider, deleteAiProvider, testTelegram, testEmail, startClaudeLogin, getClaudeStatus } from './settings.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -189,6 +189,16 @@ app.post('/api/settings/custom', (req, res) => {
 
 app.delete('/api/settings/custom/:name', (req, res) => {
   deleteCustom(req.params.name);
+  res.json({ ok: true });
+});
+
+app.post('/api/settings/ai-provider', (req, res) => {
+  try { saveAiProvider(req.body.name, req.body.baseUrl, req.body.key); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/settings/ai-provider/:name', (req, res) => {
+  deleteAiProvider(req.params.name);
   res.json({ ok: true });
 });
 

@@ -6,6 +6,7 @@ const HOME = process.env.HOME;
 const SECRETS_DIR = join(HOME, '.secrets');
 const SETTINGS_FILE = join(SECRETS_DIR, 'agentremote-settings.env');
 const CUSTOM_FILE = join(SECRETS_DIR, 'custom.env');
+const AI_PROVIDERS_FILE = join(SECRETS_DIR, 'ai-providers.json');
 const CLAUDE_CREDS = join(HOME, '.claude', '.credentials.json');
 const NPM_BIN = join(HOME, '.npm-global', 'bin');
 
@@ -51,11 +52,25 @@ export function getClaudeStatus() {
   } catch { return { configured: false, email: null, expiresIn: null }; }
 }
 
+function readAiProviders() {
+  if (!existsSync(AI_PROVIDERS_FILE)) return [];
+  try { return JSON.parse(readFileSync(AI_PROVIDERS_FILE, 'utf8')); } catch { return []; }
+}
+
+function writeAiProviders(providers) {
+  ensureSecrets();
+  writeFileSync(AI_PROVIDERS_FILE, JSON.stringify(providers, null, 2), { mode: 0o600 });
+}
+
 export function getSettings() {
   const s = readEnvFile(SETTINGS_FILE);
   const custom = readEnvFile(CUSTOM_FILE);
+  const aiProviders = readAiProviders();
   return {
     claude: getClaudeStatus(),
+    openai: { configured: !!s.OPENAI_API_KEY, key: mask(s.OPENAI_API_KEY) },
+    gemini: { configured: !!s.GEMINI_API_KEY, key: mask(s.GEMINI_API_KEY) },
+    aiProviders: aiProviders.map(p => ({ name: p.name, baseUrl: p.baseUrl })),
     telegram: {
       configured: !!(s.TELEGRAM_BOT_TOKEN && s.TELEGRAM_CHAT_ID),
       botToken: mask(s.TELEGRAM_BOT_TOKEN),
@@ -66,24 +81,22 @@ export function getSettings() {
       address: s.GMAIL_ADDRESS || '',
       appPassword: mask(s.GMAIL_APP_PASSWORD),
     },
-    github: {
-      configured: !!s.GITHUB_TOKEN,
-      token: mask(s.GITHUB_TOKEN),
-    },
-    openai: {
-      configured: !!s.OPENAI_API_KEY,
-      key: mask(s.OPENAI_API_KEY),
-    },
-    hubspot: {
-      configured: !!s.HUBSPOT_ACCESS_TOKEN,
-      token: mask(s.HUBSPOT_ACCESS_TOKEN),
-    },
-    stripe: {
-      configured: !!s.STRIPE_SECRET_KEY,
-      key: mask(s.STRIPE_SECRET_KEY),
-    },
+    github: { configured: !!s.GITHUB_TOKEN, token: mask(s.GITHUB_TOKEN) },
+    hubspot: { configured: !!s.HUBSPOT_ACCESS_TOKEN, token: mask(s.HUBSPOT_ACCESS_TOKEN) },
+    stripe: { configured: !!s.STRIPE_SECRET_KEY, key: mask(s.STRIPE_SECRET_KEY) },
     custom: Object.entries(custom).map(([name, val]) => ({ name, masked: mask(val) })),
   };
+}
+
+export function saveAiProvider(name, baseUrl, key) {
+  if (!name || !key) throw new Error('Name and API key are required');
+  const providers = readAiProviders().filter(p => p.name !== name);
+  providers.push({ name, baseUrl: baseUrl || '', key });
+  writeAiProviders(providers);
+}
+
+export function deleteAiProvider(name) {
+  writeAiProviders(readAiProviders().filter(p => p.name !== name));
 }
 
 export function saveSection(section, data) {
@@ -102,6 +115,9 @@ export function saveSection(section, data) {
       break;
     case 'openai':
       if (data.key && !isMasked(data.key)) s.OPENAI_API_KEY = data.key.trim();
+      break;
+    case 'gemini':
+      if (data.key && !isMasked(data.key)) s.GEMINI_API_KEY = data.key.trim();
       break;
     case 'hubspot':
       if (data.token && !isMasked(data.token)) s.HUBSPOT_ACCESS_TOKEN = data.token.trim();
