@@ -238,7 +238,7 @@
     el.innerHTML = conversation.map(entry => {
       const ts = entry.ts ? `<span class="bubble-time">${formatMsgTime(entry.ts)}</span>` : '';
       if (entry.role === 'user') {
-        return `<div class="bubble user"><div class="bubble-text">${esc(entry.text)}${ts}</div></div>`;
+        return `<div class="bubble user"><div class="bubble-text">${escNl(entry.text)}${ts}</div></div>`;
       }
       return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}${ts}</div></div>`;
     }).join('');
@@ -360,7 +360,7 @@
     const sections = conversation.map(entry => {
       const ts = entry.ts ? `<span class="md-ts">${formatMsgTime(entry.ts)}</span>` : '';
       if (entry.role === 'user') {
-        return `<div class="md-user">${esc(entry.text)}${ts}</div>`;
+        return `<div class="md-user">${escNl(entry.text)}${ts}</div>`;
       }
       const text = aiBlocks[aiIdx] || entry.text;
       aiIdx++;
@@ -393,7 +393,7 @@
     const bubbles = conv.map(entry => {
       const ts = entry.ts ? `<span class="bubble-time">${formatMsgTime(entry.ts)}</span>` : '';
       if (entry.role === 'user') {
-        return `<div class="bubble user"><div class="bubble-text">${esc(entry.text)}${ts}</div></div>`;
+        return `<div class="bubble user"><div class="bubble-text">${escNl(entry.text)}${ts}</div></div>`;
       }
       const toolsHtml = entry.tools?.length
         ? `<div class="jsonl-tools">${entry.tools.map(t => `<span class="jsonl-tool">${esc(t.name)}</span>`).join('')}</div>`
@@ -736,6 +736,9 @@
   function esc(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
+  function escNl(str) {
+    return esc(str).replace(/\n/g, '<br>').replace(/\\n/g, '<br>');
+  }
 
   // --- Init ---
   function initApp() {
@@ -798,17 +801,23 @@
     const claudeBadge = document.getElementById('sc-claude-badge');
     const claudeStatus = document.getElementById('sc-claude-status');
     const claudeBtn = document.getElementById('claude-login-btn');
-    if (claude.configured) {
+    const hasOAuth = claude.configured;
+    const hasApiKey = !!claude.key;
+    if (hasOAuth || hasApiKey) {
       claudeBadge.textContent = '✓ Connected';
       claudeBadge.className = 'sc-badge ok';
-      claudeStatus.textContent = (claude.email || '') + (claude.expiresIn ? ` · token expires in ${claude.expiresIn} min` : '');
-      claudeBtn.textContent = 'Re-authenticate';
+      const parts = [];
+      if (hasOAuth) parts.push((claude.email || 'OAuth') + (claude.expiresIn ? ` (${claude.expiresIn}min)` : ''));
+      if (hasApiKey) parts.push('API key set');
+      claudeStatus.textContent = parts.join(' · ');
+      claudeBtn.textContent = hasOAuth ? 'Re-authenticate' : 'Login with Claude.ai';
     } else {
       claudeBadge.textContent = 'Not connected';
       claudeBadge.className = 'sc-badge';
       claudeStatus.textContent = '';
       claudeBtn.textContent = 'Login with Claude.ai';
     }
+    if (claude.key) document.getElementById('cl-api-key').value = claude.key;
 
     // Telegram
     setBadge('sc-telegram-badge', d.telegram.configured, 'Connected');
@@ -824,13 +833,26 @@
     setBadge('sc-github-badge', d.github.configured, 'Connected');
     if (d.github.token) document.getElementById('gh-token').value = d.github.token;
 
-    // OpenAI
+    // Codex / OpenAI
     setBadge('sc-openai-badge', d.openai.configured, 'Connected');
     if (d.openai.key) document.getElementById('oa-key').value = d.openai.key;
+    {
+      const parts = [];
+      if (d.openai.key) parts.push('API key set');
+      if (d.openai.mode) parts.push(`OAuth: ${d.openai.mode}`);
+      document.getElementById('sc-openai-status').textContent = parts.join(' · ');
+      document.getElementById('codex-login-btn').textContent = d.openai.mode ? 'Re-authenticate' : 'Login with Codex';
+    }
 
     // Gemini
     setBadge('sc-gemini-badge', d.gemini?.configured, 'Connected');
     if (d.gemini?.key) document.getElementById('gm-key').value = d.gemini.key;
+    {
+      const parts = [];
+      if (d.gemini?.key) parts.push('API key set');
+      if (d.gemini?.configured && !d.gemini?.key) parts.push('OAuth detected');
+      document.getElementById('sc-gemini-status').textContent = parts.join(' · ');
+    }
 
     // Custom AI providers
     renderAiCustomList(d.aiProviders || []);
@@ -891,7 +913,17 @@
     });
   }
 
-  // Claude login
+  // Claude API key save
+  document.getElementById('cl-api-save').addEventListener('click', async () => {
+    const res = await api('POST', '/api/settings/claude', { key: document.getElementById('cl-api-key').value });
+    showMsg('cl-api-msg', res?.error || 'Saved', !!res?.error);
+    if (!res?.error) {
+      const data = await api('GET', '/api/settings');
+      if (data) renderSettings(data);
+    }
+  });
+
+  // Claude OAuth login
   let claudePollTimer = null;
   document.getElementById('claude-login-btn').addEventListener('click', async () => {
     const btn = document.getElementById('claude-login-btn');
@@ -919,6 +951,42 @@
       if (status?.configured) {
         clearInterval(claudePollTimer);
         claudePollTimer = null;
+        const data = await api('GET', '/api/settings');
+        if (data) renderSettings(data);
+        urlEl.classList.add('hidden');
+        hint.textContent = '';
+      }
+    }, 2000);
+  });
+
+  // Codex OAuth login
+  let codexPollTimer = null;
+  document.getElementById('codex-login-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('codex-login-btn');
+    const urlEl = document.getElementById('codex-login-url');
+    const hint = document.getElementById('codex-login-hint');
+    btn.disabled = true;
+    btn.textContent = 'Getting login URL…';
+    urlEl.classList.add('hidden');
+    hint.textContent = '';
+    const res = await api('POST', '/api/settings/codex/login');
+    btn.disabled = false;
+    if (!res || res.error) {
+      btn.textContent = 'Login with Codex';
+      hint.textContent = res?.error || 'Failed to start login';
+      return;
+    }
+    btn.textContent = 'Waiting for login…';
+    urlEl.href = res.url;
+    urlEl.classList.remove('hidden');
+    hint.textContent = 'Open the link above, log in, then return here.';
+
+    if (codexPollTimer) clearInterval(codexPollTimer);
+    codexPollTimer = setInterval(async () => {
+      const status = await api('GET', '/api/settings/codex/status');
+      if (status?.configured) {
+        clearInterval(codexPollTimer);
+        codexPollTimer = null;
         const data = await api('GET', '/api/settings');
         if (data) renderSettings(data);
         urlEl.classList.add('hidden');

@@ -50,6 +50,7 @@ export function readJsonlConversation(workdir) {
         text = textBlocks.map(c => c.text).join('').trim();
       }
       if (!text || text.startsWith('<')) continue; // skip internal command/caveat injections
+      if (text.startsWith('This session is being continued from a previous conversation')) continue;
       const uid = `u${userCount++}`;
       msgMap.set(uid, { role: 'user', text, ts: entry.timestamp || msg.timestamp || null });
       order.push(uid);

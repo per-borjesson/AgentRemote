@@ -535,6 +535,14 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   font-family: inherit;
 }
 .sc-input:focus { outline: none; border-color: var(--accent); }
+.sc-input:-webkit-autofill,
+.sc-input:-webkit-autofill:hover,
+.sc-input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 30px var(--bg) inset !important;
+  -webkit-text-fill-color: var(--text) !important;
+  caret-color: var(--text);
+}
+.sc-divider { font-size: .75rem; color: var(--muted); text-align: center; padding: .1rem 0; }
 .sc-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .sc-btn {
   padding: .4rem .85rem;

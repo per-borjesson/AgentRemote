@@ -1,14 +1,25 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { spawn } from 'child_process';
 import { join } from 'path';
 
 const HOME = process.env.HOME;
-const SECRETS_DIR = join(HOME, '.secrets');
-const SETTINGS_FILE = join(SECRETS_DIR, 'agentremote-settings.env');
-const CUSTOM_FILE = join(SECRETS_DIR, 'custom.env');
+const SECRETS_DIR    = join(HOME, '.secrets');
+const TELEGRAM_FILE  = join(SECRETS_DIR, 'telegram.env');
+const GITHUB_FILE    = join(SECRETS_DIR, 'github.env');
+const HUBSPOT_FILE   = join(SECRETS_DIR, 'hubspot-main.env');
+const STRIPE_FILE    = join(SECRETS_DIR, 'stripe.env');
+const OPENAI_FILE    = join(SECRETS_DIR, 'openai.env');
+const GEMINI_FILE    = join(SECRETS_DIR, 'gemini.env');
+const ANTHROPIC_FILE = join(SECRETS_DIR, 'anthropic.env');
+const GMAIL_FILE     = join(SECRETS_DIR, 'gmail.env');
+const GMAIL_LEGACY   = join(HOME, '.openclaw', 'email.env'); // fallback for existing installations
+const CUSTOM_FILE    = join(SECRETS_DIR, 'custom.env');
 const AI_PROVIDERS_FILE = join(SECRETS_DIR, 'ai-providers.json');
-const CLAUDE_CREDS = join(HOME, '.claude', '.credentials.json');
-const NPM_BIN = join(HOME, '.npm-global', 'bin');
+
+const CLAUDE_CREDS  = join(HOME, '.claude', '.credentials.json');
+const CODEX_AUTH    = join(HOME, '.codex', 'auth.json');
+const GEMINI_OAUTH  = join(HOME, '.gemini', 'oauth_creds.json');
+const NPM_BIN       = join(HOME, '.npm-global', 'bin');
 
 function ensureSecrets() {
   if (!existsSync(SECRETS_DIR)) mkdirSync(SECRETS_DIR, { recursive: true, mode: 0o700 });
@@ -36,7 +47,6 @@ function mask(val) {
   return val.slice(0, 4) + '••••••••' + val.slice(-4);
 }
 
-// Detect if a value contains masking chars (user didn't change it)
 function isMasked(val) {
   return typeof val === 'string' && val.includes('•');
 }
@@ -52,6 +62,23 @@ export function getClaudeStatus() {
   } catch { return { configured: false, email: null, expiresIn: null }; }
 }
 
+export function getCodexOAuthStatus() {
+  if (!existsSync(CODEX_AUTH)) return { configured: false, mode: null };
+  try {
+    const a = JSON.parse(readFileSync(CODEX_AUTH, 'utf8'));
+    if (!a.tokens && !a.auth_mode) return { configured: false, mode: null };
+    return { configured: true, mode: a.auth_mode || 'oauth' };
+  } catch { return { configured: false, mode: null }; }
+}
+
+export function getGeminiOAuthStatus() {
+  if (!existsSync(GEMINI_OAUTH)) return { configured: false };
+  try {
+    const c = JSON.parse(readFileSync(GEMINI_OAUTH, 'utf8'));
+    return { configured: !!c.access_token };
+  } catch { return { configured: false }; }
+}
+
 function readAiProviders() {
   if (!existsSync(AI_PROVIDERS_FILE)) return [];
   try { return JSON.parse(readFileSync(AI_PROVIDERS_FILE, 'utf8')); } catch { return []; }
@@ -63,29 +90,100 @@ function writeAiProviders(providers) {
 }
 
 export function getSettings() {
-  const s = readEnvFile(SETTINGS_FILE);
-  const custom = readEnvFile(CUSTOM_FILE);
+  const telegram  = readEnvFile(TELEGRAM_FILE);
+  const github    = readEnvFile(GITHUB_FILE);
+  const hubspot   = readEnvFile(HUBSPOT_FILE);
+  const stripe    = readEnvFile(STRIPE_FILE);
+  const openai    = readEnvFile(OPENAI_FILE);
+  const gemini    = readEnvFile(GEMINI_FILE);
+  const anthropic = readEnvFile(ANTHROPIC_FILE);
+  const gmailRaw  = readEnvFile(GMAIL_FILE);
+  // Fall back to OpenClaw's email.env for existing installations that predate gmail.env
+  const gmailLegacy = (!gmailRaw.GMAIL_ADDRESS && existsSync(GMAIL_LEGACY)) ? readEnvFile(GMAIL_LEGACY) : {};
+  const gmail = {
+    GMAIL_ADDRESS:    gmailRaw.GMAIL_ADDRESS    || gmailLegacy.IMAP_USER || '',
+    GMAIL_APP_PASSWORD: gmailRaw.GMAIL_APP_PASSWORD || gmailLegacy.IMAP_PASS || '',
+  };
+  const custom    = readEnvFile(CUSTOM_FILE);
   const aiProviders = readAiProviders();
+
   return {
-    claude: getClaudeStatus(),
-    openai: { configured: !!s.OPENAI_API_KEY, key: mask(s.OPENAI_API_KEY) },
-    gemini: { configured: !!s.GEMINI_API_KEY, key: mask(s.GEMINI_API_KEY) },
+    claude:  { ...getClaudeStatus(), key: mask(anthropic.ANTHROPIC_API_KEY) },
+    openai:  (oa => ({ ...oa, configured: !!openai.OPENAI_API_KEY || oa.configured, key: mask(openai.OPENAI_API_KEY) }))(getCodexOAuthStatus()),
+    gemini:  (gm => ({ ...gm, configured: !!gemini.GEMINI_API_KEY || gm.configured, key: mask(gemini.GEMINI_API_KEY) }))(getGeminiOAuthStatus()),
     aiProviders: aiProviders.map(p => ({ name: p.name, baseUrl: p.baseUrl })),
     telegram: {
-      configured: !!(s.TELEGRAM_BOT_TOKEN && s.TELEGRAM_CHAT_ID),
-      botToken: mask(s.TELEGRAM_BOT_TOKEN),
-      chatId: s.TELEGRAM_CHAT_ID || '',
+      configured: !!(telegram.BOT_TOKEN && telegram.CHAT_ID),
+      botToken: mask(telegram.BOT_TOKEN),
+      chatId: telegram.CHAT_ID || '',
     },
     email: {
-      configured: !!(s.GMAIL_ADDRESS && s.GMAIL_APP_PASSWORD),
-      address: s.GMAIL_ADDRESS || '',
-      appPassword: mask(s.GMAIL_APP_PASSWORD),
+      configured: !!(gmail.GMAIL_ADDRESS && gmail.GMAIL_APP_PASSWORD),
+      address: gmail.GMAIL_ADDRESS || '',
+      appPassword: mask(gmail.GMAIL_APP_PASSWORD),
     },
-    github: { configured: !!s.GITHUB_TOKEN, token: mask(s.GITHUB_TOKEN) },
-    hubspot: { configured: !!s.HUBSPOT_ACCESS_TOKEN, token: mask(s.HUBSPOT_ACCESS_TOKEN) },
-    stripe: { configured: !!s.STRIPE_SECRET_KEY, key: mask(s.STRIPE_SECRET_KEY) },
-    custom: Object.entries(custom).map(([name, val]) => ({ name, masked: mask(val) })),
+    github:  { configured: !!github.GITHUB_TOKEN,             token: mask(github.GITHUB_TOKEN) },
+    hubspot: { configured: !!hubspot.HUBSPOT_ACCESS_TOKEN,    token: mask(hubspot.HUBSPOT_ACCESS_TOKEN) },
+    stripe:  { configured: !!stripe.STRIPE_SECRET_KEY,        key:   mask(stripe.STRIPE_SECRET_KEY) },
+    custom:  Object.entries(custom).map(([name, val]) => ({ name, masked: mask(val) })),
   };
+}
+
+export function saveSection(section, data) {
+  switch (section) {
+    case 'claude': {
+      const s = readEnvFile(ANTHROPIC_FILE);
+      if (data.key && !isMasked(data.key)) s.ANTHROPIC_API_KEY = data.key.trim();
+      writeEnvFile(ANTHROPIC_FILE, s);
+      break;
+    }
+    case 'openai': {
+      const s = readEnvFile(OPENAI_FILE);
+      if (data.key && !isMasked(data.key)) s.OPENAI_API_KEY = data.key.trim();
+      writeEnvFile(OPENAI_FILE, s);
+      break;
+    }
+    case 'gemini': {
+      const s = readEnvFile(GEMINI_FILE);
+      if (data.key && !isMasked(data.key)) s.GEMINI_API_KEY = data.key.trim();
+      writeEnvFile(GEMINI_FILE, s);
+      break;
+    }
+    case 'telegram': {
+      const s = readEnvFile(TELEGRAM_FILE);
+      if (data.botToken && !isMasked(data.botToken)) s.BOT_TOKEN = data.botToken.trim();
+      if (data.chatId) s.CHAT_ID = data.chatId.trim();
+      writeEnvFile(TELEGRAM_FILE, s);
+      break;
+    }
+    case 'email': {
+      const s = readEnvFile(GMAIL_FILE);
+      if (data.address) s.GMAIL_ADDRESS = data.address.trim();
+      if (data.appPassword && !isMasked(data.appPassword)) s.GMAIL_APP_PASSWORD = data.appPassword.trim();
+      writeEnvFile(GMAIL_FILE, s);
+      break;
+    }
+    case 'github': {
+      const s = readEnvFile(GITHUB_FILE);
+      if (data.token && !isMasked(data.token)) s.GITHUB_TOKEN = data.token.trim();
+      writeEnvFile(GITHUB_FILE, s);
+      break;
+    }
+    case 'hubspot': {
+      const s = readEnvFile(HUBSPOT_FILE);
+      if (data.token && !isMasked(data.token)) s.HUBSPOT_ACCESS_TOKEN = data.token.trim();
+      writeEnvFile(HUBSPOT_FILE, s);
+      break;
+    }
+    case 'stripe': {
+      const s = readEnvFile(STRIPE_FILE);
+      if (data.key && !isMasked(data.key)) s.STRIPE_SECRET_KEY = data.key.trim();
+      writeEnvFile(STRIPE_FILE, s);
+      break;
+    }
+    default:
+      throw new Error(`unknown section: ${section}`);
+  }
 }
 
 export function saveAiProvider(name, baseUrl, key) {
@@ -97,38 +195,6 @@ export function saveAiProvider(name, baseUrl, key) {
 
 export function deleteAiProvider(name) {
   writeAiProviders(readAiProviders().filter(p => p.name !== name));
-}
-
-export function saveSection(section, data) {
-  const s = readEnvFile(SETTINGS_FILE);
-  switch (section) {
-    case 'telegram':
-      if (data.botToken && !isMasked(data.botToken)) s.TELEGRAM_BOT_TOKEN = data.botToken.trim();
-      if (data.chatId) s.TELEGRAM_CHAT_ID = data.chatId.trim();
-      break;
-    case 'email':
-      if (data.address) s.GMAIL_ADDRESS = data.address.trim();
-      if (data.appPassword && !isMasked(data.appPassword)) s.GMAIL_APP_PASSWORD = data.appPassword.trim();
-      break;
-    case 'github':
-      if (data.token && !isMasked(data.token)) s.GITHUB_TOKEN = data.token.trim();
-      break;
-    case 'openai':
-      if (data.key && !isMasked(data.key)) s.OPENAI_API_KEY = data.key.trim();
-      break;
-    case 'gemini':
-      if (data.key && !isMasked(data.key)) s.GEMINI_API_KEY = data.key.trim();
-      break;
-    case 'hubspot':
-      if (data.token && !isMasked(data.token)) s.HUBSPOT_ACCESS_TOKEN = data.token.trim();
-      break;
-    case 'stripe':
-      if (data.key && !isMasked(data.key)) s.STRIPE_SECRET_KEY = data.key.trim();
-      break;
-    default:
-      throw new Error(`unknown section: ${section}`);
-  }
-  writeEnvFile(SETTINGS_FILE, s);
 }
 
 export function saveCustom(name, value) {
@@ -146,10 +212,10 @@ export function deleteCustom(name) {
 }
 
 export async function testTelegram() {
-  const s = readEnvFile(SETTINGS_FILE);
-  if (!s.TELEGRAM_BOT_TOKEN || !s.TELEGRAM_CHAT_ID) throw new Error('Telegram not configured');
-  const body = JSON.stringify({ chat_id: s.TELEGRAM_CHAT_ID, text: '✅ AgentRemote connected' });
-  const result = await fetch(`https://api.telegram.org/bot${s.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+  const s = readEnvFile(TELEGRAM_FILE);
+  if (!s.BOT_TOKEN || !s.CHAT_ID) throw new Error('Telegram not configured');
+  const body = JSON.stringify({ chat_id: s.CHAT_ID, text: '✅ AgentRemote connected' });
+  const result = await fetch(`https://api.telegram.org/bot${s.BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
@@ -160,14 +226,17 @@ export async function testTelegram() {
 }
 
 export async function testEmail() {
-  const s = readEnvFile(SETTINGS_FILE);
-  if (!s.GMAIL_ADDRESS || !s.GMAIL_APP_PASSWORD) throw new Error('Email not configured');
+  const raw = readEnvFile(GMAIL_FILE);
+  const legacy = (!raw.GMAIL_ADDRESS && existsSync(GMAIL_LEGACY)) ? readEnvFile(GMAIL_LEGACY) : {};
+  const address  = raw.GMAIL_ADDRESS     || legacy.IMAP_USER || '';
+  const password = raw.GMAIL_APP_PASSWORD || legacy.IMAP_PASS || '';
+  if (!address || !password) throw new Error('Email not configured');
   return new Promise((resolve, reject) => {
     const script = `
 import imaplib, sys
 try:
     m = imaplib.IMAP4_SSL('imap.gmail.com', 993)
-    m.login(${JSON.stringify(s.GMAIL_ADDRESS)}, ${JSON.stringify(s.GMAIL_APP_PASSWORD)})
+    m.login(${JSON.stringify(address)}, ${JSON.stringify(password)})
     m.logout()
     print('ok')
 except Exception as e:
@@ -186,10 +255,50 @@ except Exception as e:
   });
 }
 
+let codexLoginProc = null;
+
+export function startCodexLogin() {
+  return new Promise((resolve, reject) => {
+    if (codexLoginProc) {
+      try { codexLoginProc.kill(); } catch {}
+      codexLoginProc = null;
+    }
+
+    const env = { ...process.env, PATH: `${NPM_BIN}:${process.env.PATH || '/usr/bin:/bin'}` };
+    const proc = spawn('codex', ['login', '--device-auth'], { env });
+    codexLoginProc = proc;
+
+    let url = null;
+    const urlRe = /https:\/\/[^\s\x1b\]'"]+/;
+
+    const check = chunk => {
+      if (url) return;
+      const text = chunk.toString().replace(/\x1b\[[0-9;]*[mGKH]/g, '');
+      const m = text.match(urlRe);
+      if (m) {
+        url = m[0].replace(/['".,)]+$/, '');
+        clearTimeout(timer);
+        resolve({ url });
+      }
+    };
+
+    proc.stdout.on('data', check);
+    proc.stderr.on('data', check);
+    proc.on('close', () => { codexLoginProc = null; });
+    proc.on('error', err => { codexLoginProc = null; clearTimeout(timer); if (!url) reject(err); });
+
+    const timer = setTimeout(() => {
+      if (!url) {
+        try { proc.kill(); } catch {}
+        codexLoginProc = null;
+        reject(new Error('Timed out — could not get login URL from codex'));
+      }
+    }, 20000);
+  });
+}
+
 let claudeLoginProc = null;
 
-// Spawn `claude login`, capture the OAuth URL it prints, return it.
-// The process stays alive until the user completes OAuth in the browser.
 export function startClaudeLogin() {
   return new Promise((resolve, reject) => {
     if (claudeLoginProc) {

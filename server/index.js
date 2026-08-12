@@ -17,7 +17,7 @@ import {
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
 import { readJsonlConversation } from './jsonl.js';
-import { getSettings, saveSection, saveCustom, deleteCustom, saveAiProvider, deleteAiProvider, testTelegram, testEmail, startClaudeLogin, getClaudeStatus } from './settings.js';
+import { getSettings, saveSection, saveCustom, deleteCustom, saveAiProvider, deleteAiProvider, testTelegram, testEmail, startClaudeLogin, getClaudeStatus, startCodexLogin, getCodexOAuthStatus, readEnvFile } from './settings.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -169,6 +169,13 @@ app.get('/api/settings/claude/status', (req, res) => res.json(getClaudeStatus())
 
 app.post('/api/settings/claude/login', async (req, res) => {
   try { res.json(await startClaudeLogin()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/settings/codex/status', (req, res) => res.json(getCodexOAuthStatus()));
+
+app.post('/api/settings/codex/login', async (req, res) => {
+  try { res.json(await startCodexLogin()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -362,11 +369,16 @@ setInterval(() => {
   broadcast({ type: 'sessions_update', sessions });
 }, 2000);
 
-// Telegram
-if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
-  initTelegram(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID, broadcast);
-} else {
-  console.warn('[telegram] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — Telegram disabled');
+// Telegram — read from canonical ~/.secrets/telegram.env, fall back to .env
+{
+  const tgEnv = readEnvFile(join(process.env.HOME, '.secrets', 'telegram.env'));
+  const tgToken  = tgEnv.BOT_TOKEN  || process.env.TELEGRAM_BOT_TOKEN;
+  const tgChatId = tgEnv.CHAT_ID    || process.env.TELEGRAM_CHAT_ID;
+  if (tgToken && tgChatId) {
+    initTelegram(tgToken, tgChatId, broadcast);
+  } else {
+    console.warn('[telegram] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set — Telegram disabled');
+  }
 }
 
 server.listen(PORT, () => {

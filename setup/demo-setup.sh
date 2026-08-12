@@ -179,8 +179,13 @@ with smtplib.SMTP("localhost", 25) as s:
 | npm / npx | `/usr/bin/npm` |
 | git | `/usr/bin/git` |
 | curl / wget | Standard HTTP clients |
-| Playwright | `playwright` — browser automation |
+| Playwright | `playwright` — browser automation (Chromium included) |
 | tmux | Session management (used by AgentRemote) |
+| fastapi + uvicorn | Async HTTP APIs |
+| flask | Sync HTTP APIs |
+| httpx | Async HTTP client |
+| pydantic | Data validation / structured output |
+| python-dotenv | Load .env files |
 
 ---
 
@@ -279,6 +284,17 @@ _Generated: $(date '+%Y-%m-%d %H:%M:%S')_
 _Run \`sudo systemctl status agentremote-${DEMO_USER}\` to check live status._
 EOF
 chown "${DEMO_USER}:${DEMO_USER}" "${HOME_DIR}/agents/Systemadmin/system_state.md"
+
+# ── Python packages ───────────────────────────────────────────────────────────
+echo "  Installing Python packages for agent sessions..."
+run_as "pip3 install --user --quiet fastapi uvicorn flask httpx pydantic python-dotenv"
+
+echo "  Installing Playwright (133 MB — browser automation)..."
+run_as "pip3 install --user --quiet playwright"
+# Install Chromium browser binaries — this downloads ~300 MB
+run_as "python3 -m playwright install chromium"
+
+echo "  Python packages installed."
 
 # ── systemd service ───────────────────────────────────────────────────────────
 SERVICE_FILE="/etc/systemd/system/agentremote-${DEMO_USER}.service"

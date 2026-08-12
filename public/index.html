@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="/style.css?v=20260811-3">
+  <link rel="stylesheet" href="/style.css?v=20260812-2">
 </head>
 <body>
   <div id="app">
@@ -119,6 +119,10 @@
           </div>
           <div class="sc-body">
             <p class="sc-status" id="sc-claude-status"></p>
+            <input class="sc-input" id="cl-api-key" type="password" autocomplete="new-password" placeholder="API key (sk-ant-...)">
+            <div class="sc-actions"><button class="sc-btn" id="cl-api-save">Save API key</button></div>
+            <p class="sc-msg hidden" id="cl-api-msg"></p>
+            <p class="sc-divider">— or login with OAuth —</p>
             <button class="sc-btn primary" id="claude-login-btn">Login with Claude.ai</button>
             <a class="sc-url hidden" id="claude-login-url" target="_blank">Open login page →</a>
             <p class="sc-hint" id="claude-login-hint"></p>
@@ -132,10 +136,15 @@
             <span class="sc-badge" id="sc-openai-badge">Not configured</span>
           </div>
           <div class="sc-body">
-            <input class="sc-input" id="oa-key" type="password" placeholder="API key (sk-...)">
+            <p class="sc-status" id="sc-openai-status"></p>
+            <input class="sc-input" id="oa-key" type="password" autocomplete="new-password" placeholder="API key (sk-...)">
             <p class="sc-hint">Used by both OpenAI API calls and the Codex CLI. Create at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>.</p>
-            <div class="sc-actions"><button class="sc-btn" id="oa-save">Save</button></div>
+            <div class="sc-actions"><button class="sc-btn" id="oa-save">Save API key</button></div>
             <p class="sc-msg hidden" id="oa-msg"></p>
+            <p class="sc-divider">— or login with OAuth —</p>
+            <button class="sc-btn primary" id="codex-login-btn">Login with Codex</button>
+            <a class="sc-url hidden" id="codex-login-url" target="_blank">Open login page →</a>
+            <p class="sc-hint" id="codex-login-hint"></p>
           </div>
         </div>
 
@@ -146,9 +155,10 @@
             <span class="sc-badge" id="sc-gemini-badge">Not configured</span>
           </div>
           <div class="sc-body">
-            <input class="sc-input" id="gm-key" type="password" placeholder="API key">
-            <p class="sc-hint">Get a key at <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>.</p>
-            <div class="sc-actions"><button class="sc-btn" id="gm-save">Save</button></div>
+            <p class="sc-status" id="sc-gemini-status"></p>
+            <input class="sc-input" id="gm-key" type="password" autocomplete="new-password" placeholder="API key">
+            <p class="sc-hint">Get a key at <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a>. For OAuth, run <code>gemini</code> once in a terminal to complete Google login.</p>
+            <div class="sc-actions"><button class="sc-btn" id="gm-save">Save API key</button></div>
             <p class="sc-msg hidden" id="gm-msg"></p>
           </div>
         </div>
@@ -197,8 +207,8 @@
             <span class="sc-badge" id="sc-email-badge">Not configured</span>
           </div>
           <div class="sc-body">
-            <input class="sc-input" id="em-address" type="email" placeholder="Gmail address">
-            <input class="sc-input" id="em-password" type="password" placeholder="App password">
+            <input class="sc-input" id="em-address" type="text" inputmode="email" autocomplete="off" placeholder="Gmail address">
+            <input class="sc-input" id="em-password" type="password" autocomplete="new-password" placeholder="App password">
             <p class="sc-hint">Use a <a href="https://myaccount.google.com/apppasswords" target="_blank">Google App Password</a> — not your account password. Requires 2FA enabled.</p>
             <div class="sc-actions">
               <button class="sc-btn" id="em-save">Save</button>
@@ -307,6 +317,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=20260811-3"></script>
+  <script src="/app.js?v=20260812-2"></script>
 </body>
 </html>
