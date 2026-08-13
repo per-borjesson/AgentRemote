@@ -3,7 +3,7 @@ import { join } from 'path';
 
 function projectDir(workdir) {
   if (!workdir) return null;
-  const key = workdir.replace(/\//g, '-');
+  const key = workdir.replace(/[/_]/g, '-');
   const dir = join(process.env.HOME, '.claude', 'projects', key);
   return existsSync(dir) ? dir : null;
 }
@@ -51,6 +51,7 @@ export function readJsonlConversation(workdir) {
       }
       if (!text || text.startsWith('<')) continue; // skip internal command/caveat injections
       if (text.startsWith('This session is being continued from a previous conversation')) continue;
+      if (text.startsWith('Base directory for this skill:')) continue; // skip skill injection blocks
       const uid = `u${userCount++}`;
       msgMap.set(uid, { role: 'user', text, ts: entry.timestamp || msg.timestamp || null });
       order.push(uid);

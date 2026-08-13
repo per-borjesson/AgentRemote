@@ -85,7 +85,7 @@
         conversation = [...msg.conversation, ...pending];
         if (viewMode === 'chat') renderChat();
       }
-      if (msg.jsonl) { lastJsonlData = msg.jsonl; if (viewMode === 'jsonl') renderJsonlView(msg.jsonl); }
+      if (msg.jsonl) { lastJsonlData = msg.jsonl; if (viewMode === 'jsonl') scheduleJsonlRender(msg.jsonl); }
       if (viewMode === 'markdown') renderMarkdownView(msg.output);
       renderOutput(msg.output);
       if (msg.questionnaire) showQuestionnaireBanner(msg.questionnaire);
@@ -197,7 +197,7 @@
       conversation = res.conversation;
       if (viewMode === 'chat') renderChat();
     }
-    if (res.jsonl) { lastJsonlData = res.jsonl; if (viewMode === 'jsonl') renderJsonlView(res.jsonl); }
+    if (res.jsonl) { lastJsonlData = res.jsonl; if (viewMode === 'jsonl') scheduleJsonlRender(res.jsonl); }
     if (viewMode === 'markdown') renderMarkdownView(res.output);
     renderOutput(res.output);
   }
@@ -372,6 +372,19 @@
   }
 
   // --- JSONL view (native Claude conversation from ~/.claude/projects/) ---
+  let _jsonlFp = null;
+  let _jsonlIdlePending = false;
+
+  function scheduleJsonlRender(data) {
+    lastJsonlData = data;
+    if (_jsonlIdlePending) return;
+    _jsonlIdlePending = true;
+    requestIdleCallback(() => {
+      _jsonlIdlePending = false;
+      renderJsonlView(lastJsonlData);
+    }, { timeout: 500 });
+  }
+
   function renderJsonlView(data) {
     const el = document.getElementById('jsonl-view');
 
@@ -379,6 +392,13 @@
     // the 2-second polling loop destroying the selection mid-copy.
     const sel = window.getSelection();
     if (sel && sel.toString().length > 0 && el.contains(sel.anchorNode)) return;
+
+    // Skip if data hasn't meaningfully changed since last render.
+    const fp = data
+      ? `${data.conv.length}:${data.status}:${data.conv.at(-1)?.text?.length ?? 0}`
+      : 'null';
+    if (fp === _jsonlFp) return;
+    _jsonlFp = fp;
 
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
