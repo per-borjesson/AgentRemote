@@ -280,10 +280,27 @@
   }
 
   function inlineMarkdown(text) {
-    return esc(text)
-      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    const fileLinkRe = /\[([^\]]+)\]\(\/api\/file\?path=([^)]+)\)/g;
+    const segments = [];
+    let last = 0, match;
+    while ((match = fileLinkRe.exec(text)) !== null) {
+      if (match.index > last) segments.push({ t: 'text', v: text.slice(last, match.index) });
+      segments.push({ t: 'file', name: match[1], path: match[2] });
+      last = match.index + match[0].length;
+    }
+    if (last < text.length) segments.push({ t: 'text', v: text.slice(last) });
+    return segments.map(seg => {
+      if (seg.t === 'file') {
+        const ext = seg.name.split('.').pop().toLowerCase();
+        const icon = ({ pdf: '📄', xml: '📋', csv: '📊', xlsx: '📊', xls: '📊', json: '📋', zip: '🗜️', png: '🖼️', jpg: '🖼️', jpeg: '🖼️' })[ext] || '📎';
+        const href = `/api/file?path=${encodeURIComponent(seg.path)}&token=${encodeURIComponent(token)}`;
+        return `<a href="${href}" class="file-card" download="${esc(seg.name)}">${icon} <span class="file-card-name">${esc(seg.name)}</span><span class="file-card-dl">↓</span></a>`;
+      }
+      return esc(seg.v)
+        .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+    }).join('');
   }
 
   // --- Terminal view ---

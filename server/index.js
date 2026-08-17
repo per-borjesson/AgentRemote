@@ -3,7 +3,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
-import { dirname, join, basename } from 'path';
+import { dirname, join, basename, resolve } from 'path';
 import { existsSync, readdirSync, statSync, mkdirSync } from 'fs';
 import { execSync } from 'child_process';
 import multer from 'multer';
@@ -212,6 +212,16 @@ app.delete('/api/settings/ai-provider/:name', (req, res) => {
 app.post('/api/settings/:section', (req, res) => {
   try { saveSection(req.params.section, req.body); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/file', (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath) return res.status(400).json({ error: 'path required' });
+  const home = process.env.HOME;
+  const resolved = resolve(filePath.replace(/^~/, home));
+  if (!resolved.startsWith(home + '/')) return res.status(403).json({ error: 'access denied' });
+  if (!existsSync(resolved)) return res.status(404).json({ error: 'not found' });
+  res.download(resolved, basename(resolved));
 });
 
 app.delete('/api/sessions/:name', (req, res) => {
