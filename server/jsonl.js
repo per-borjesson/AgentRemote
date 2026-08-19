@@ -52,6 +52,7 @@ export function readJsonlConversation(workdir) {
       if (!text || text.startsWith('<')) continue; // skip internal command/caveat injections
       if (text.startsWith('This session is being continued from a previous conversation')) continue;
       if (text.startsWith('Base directory for this skill:')) continue; // skip skill injection blocks
+      if (text.startsWith('Approach this as the design lead')) continue;
       const uid = `u${userCount++}`;
       msgMap.set(uid, { role: 'user', text, ts: entry.timestamp || msg.timestamp || null });
       order.push(uid);
