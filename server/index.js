@@ -12,7 +12,7 @@ import {
   captureOutput, killSession, checkForApprovalPrompt,
   setApprovalPending, respondToApproval, setSessionStatus,
   checkTmuxSizes, checkForResume, resumeSession,
-  parseQuestionnaire, answerQuestionnaire,
+  parseQuestionnaire, answerQuestionnaire, updateTokensFromOutput,
 } from './sessions.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
@@ -337,6 +337,7 @@ setInterval(() => {
     // Single capture per session per cycle — 500 lines for watched sessions
     // (pane height 200 + buffer), 50 lines for unwatched (approval/resume checks only).
     const output = captureOutput(session.name, isWatched ? 500 : 50);
+    updateTokensFromOutput(session.name, output);
 
     // Stream output to subscribed clients (only when someone is watching)
     if (isWatched) {

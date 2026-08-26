@@ -64,8 +64,19 @@ export function listSessions() {
         workdir: meta.workdir || null,
         pendingApproval: meta.pendingApproval || null,
         resumeId: meta.resumeId || null,
+        tokens: meta.tokens || null,
       };
     });
+}
+
+export function updateTokensFromOutput(name, output) {
+  const clean = output.replace(/\x1b\[[0-9;]*[mGKHF]/g, '');
+  const m = clean.match(/(\d+\.?\d*k?) tokens/);
+  if (m) {
+    const meta = sessionMeta.get(name) || {};
+    meta.tokens = m[1];
+    sessionMeta.set(name, meta);
+  }
 }
 
 export function checkForResume(name, output = null) {

@@ -139,7 +139,10 @@
           <div class="name">${esc(s.name)} <span class="provider-badge">${esc(providerIcon(s.provider))}</span></div>
           <div class="task">${esc(s.task || '—')}</div>
         </div>
-        <div class="session-age">${timeAgo(s.activity)}</div>
+        <div class="session-right">
+          <div class="session-age">${timeAgo(s.activity)}</div>
+          ${s.tokens ? `<div class="session-tokens">${esc(s.tokens)}</div>` : ''}
+        </div>
       </div>
     `).join('');
 
