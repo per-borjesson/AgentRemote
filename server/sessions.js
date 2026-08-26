@@ -65,8 +65,26 @@ export function listSessions() {
         pendingApproval: meta.pendingApproval || null,
         resumeId: meta.resumeId || null,
         tokens: meta.tokens || null,
+        memory: meta.memory || null,
       };
     });
+}
+
+export function updateProcessMemory(name) {
+  try {
+    const shellPid = tmux('display-message', '-p', '-t', name, '#{pane_pid}');
+    let pid = shellPid;
+    try {
+      const child = execSync(`pgrep -P ${shellPid}`, { encoding: 'utf8' }).trim().split('\n')[0];
+      if (child) pid = child;
+    } catch {}
+    const rssKb = parseInt(execSync(`ps -o rss= -p ${pid}`, { encoding: 'utf8' }).trim(), 10);
+    if (!isNaN(rssKb)) {
+      const meta = sessionMeta.get(name) || {};
+      meta.memory = Math.round(rssKb / 1024);
+      sessionMeta.set(name, meta);
+    }
+  } catch {}
 }
 
 export function updateTokensFromOutput(name, output) {

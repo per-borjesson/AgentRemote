@@ -141,6 +141,7 @@
         </div>
         <div class="session-right">
           <div class="session-age">${timeAgo(s.activity)}</div>
+          ${s.memory ? `<div class="session-mem">${s.memory} MB</div>` : ''}
           ${s.tokens ? `<div class="session-tokens">${esc(s.tokens)}</div>` : ''}
         </div>
       </div>
