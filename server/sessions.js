@@ -71,12 +71,16 @@ export function listSessions() {
 
 export function updateTokensFromOutput(name, output) {
   const clean = output.replace(/\x1b\[[0-9;]*[mGKHF]/g, '');
-  const m = clean.match(/(\d+\.?\d*k?) tokens/);
-  if (m) {
-    const meta = sessionMeta.get(name) || {};
-    meta.tokens = m[1];
-    sessionMeta.set(name, meta);
-  }
+  const meta = sessionMeta.get(name) || {};
+  // "727.5k tokens" or "new task? /clear to save 727.5k tokens"
+  const tokM = clean.match(/(\d+\.?\d*k?) tokens/);
+  if (tokM) { meta.tokens = tokM[1]; sessionMeta.set(name, meta); return; }
+  // "~71k uncached · /clear to start fresh"
+  const uncM = clean.match(/~(\d+\.?\d*k?) uncached/);
+  if (uncM) { meta.tokens = uncM[1]; sessionMeta.set(name, meta); return; }
+  // "2% until auto-compact" — no absolute count, store percent as fallback
+  const pctM = clean.match(/(\d+)% until auto-compact/);
+  if (pctM) { meta.tokens = `${pctM[1]}%ctx`; sessionMeta.set(name, meta); }
 }
 
 export function checkForResume(name, output = null) {
