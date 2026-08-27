@@ -72,7 +72,7 @@ export function listSessions() {
 
 export function updateProcessMemory(name) {
   try {
-    const shellPid = tmux('display-message', '-p', '-t', name, '-F', '#{pane_pid}');
+    const shellPid = tmux('display-message', '-p', '-t', name, '-F', '"#{pane_pid}"');
     let pid = shellPid;
     try {
       const child = execSync(`pgrep -P ${shellPid}`, { encoding: 'utf8' }).trim().split('\n')[0];
