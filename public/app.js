@@ -787,6 +787,8 @@
 
   // --- Text-to-speech ---
   let _ttsBtn = null;
+  let _ttsKeepAliveTimer = null;
+  let _audioCtx = null;
 
   function ttsStripMarkdown(text) {
     return text
@@ -805,35 +807,71 @@
     return sv.test(text) ? 'sv-SE' : 'en-US';
   }
 
+  // Splits text into sentence-sized chunks so iOS doesn't cut off after ~15s
+  function ttsChunks(text) {
+    return text.match(/[^.!?\n]+[.!?\n]*/g)?.map(s => s.trim()).filter(Boolean) || [text];
+  }
+
+  // Silent 1-sample audio ping — keeps iOS from suspending JS when screen locks
+  function ttsPing() {
+    try {
+      if (!_audioCtx) _audioCtx = new AudioContext();
+      if (_audioCtx.state === 'suspended') _audioCtx.resume();
+      const buf = _audioCtx.createBuffer(1, 1, 22050);
+      const src = _audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(_audioCtx.destination);
+      src.start();
+    } catch {}
+  }
+
   function ttsSpeak(text, btn) {
     window.speechSynthesis.cancel();
+    clearInterval(_ttsKeepAliveTimer);
     if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
     if (_ttsBtn === btn) { _ttsBtn = null; return; }
 
     const clean = ttsStripMarkdown(text);
     const lang = ttsDetectLang(clean);
-    const utt = new SpeechSynthesisUtterance(clean);
-    utt.lang = lang;
+    const chunks = ttsChunks(clean);
 
     const voices = window.speechSynthesis.getVoices();
     const voice = voices.find(v => v.lang === lang && v.localService)
       || voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.localService)
       || voices.find(v => v.lang.startsWith(lang.split('-')[0]));
-    if (voice) utt.voice = voice;
-
-    utt.onend = utt.onerror = () => {
-      if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
-      _ttsBtn = null;
-    };
 
     _ttsBtn = btn;
     btn.textContent = '⏹';
     btn.classList.add('tts-active');
-    window.speechSynthesis.speak(utt);
+
+    // Ping every 10s to prevent iOS suspending JS when screen is off
+    ttsPing();
+    _ttsKeepAliveTimer = setInterval(ttsPing, 10000);
+
+    // Register lock-screen media controls
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: 'AgentRemote', artist: 'Reading…' });
+      navigator.mediaSession.setActionHandler('pause', ttsStop);
+      navigator.mediaSession.setActionHandler('stop', ttsStop);
+    }
+
+    let idx = 0;
+    function next() {
+      if (idx >= chunks.length || _ttsBtn !== btn) { ttsStop(); return; }
+      const utt = new SpeechSynthesisUtterance(chunks[idx++]);
+      utt.lang = lang;
+      if (voice) utt.voice = voice;
+      utt.onend = next;
+      utt.onerror = e => { if (e.error !== 'interrupted') ttsStop(); };
+      window.speechSynthesis.speak(utt);
+    }
+    next();
   }
 
   function ttsStop() {
     window.speechSynthesis.cancel();
+    clearInterval(_ttsKeepAliveTimer);
+    _ttsKeepAliveTimer = null;
     if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
     _ttsBtn = null;
   }
