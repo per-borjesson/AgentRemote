@@ -239,12 +239,12 @@
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
 
-    el.innerHTML = conversation.map(entry => {
+    el.innerHTML = conversation.map((entry, i) => {
       const ts = entry.ts ? `<span class="bubble-time">${formatMsgTime(entry.ts)}</span>` : '';
       if (entry.role === 'user') {
         return `<div class="bubble user"><div class="bubble-text">${escNl(entry.text)}${ts}</div></div>`;
       }
-      return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}${ts}</div></div>`;
+      return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}${ts}</div><button class="tts-btn" data-idx="${i}" data-view="chat">🔊</button></div>`;
     }).join('');
 
     if (atBottom) c.scrollTop = c.scrollHeight;
@@ -431,7 +431,7 @@
 
     const { conv, status } = data;
 
-    const bubbles = conv.map(entry => {
+    const bubbles = conv.map((entry, i) => {
       const ts = entry.ts ? `<span class="bubble-time">${formatMsgTime(entry.ts)}</span>` : '';
       if (entry.role === 'user') {
         return `<div class="bubble user"><div class="bubble-text">${escNl(entry.text)}${ts}</div></div>`;
@@ -439,7 +439,7 @@
       const toolsHtml = entry.tools?.length
         ? `<div class="jsonl-tools">${entry.tools.map(t => `<span class="jsonl-tool">${esc(t.name)}</span>`).join('')}</div>`
         : '';
-      return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}${toolsHtml}${ts}</div></div>`;
+      return `<div class="bubble ai"><div class="bubble-text">${renderMarkdown(entry.text)}${toolsHtml}${ts}</div><button class="tts-btn" data-idx="${i}" data-view="jsonl">🔊</button></div>`;
     }).join('');
 
     const statusHtml = status === 'thinking'
@@ -630,7 +630,18 @@
   // --- Back ---
   document.getElementById('back-btn').addEventListener('click', () => history.back());
 
+  document.getElementById('output-container').addEventListener('click', e => {
+    const btn = e.target.closest('.tts-btn');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.idx);
+    const entry = btn.dataset.view === 'jsonl'
+      ? lastJsonlData?.conv[idx]
+      : conversation[idx];
+    if (entry?.text) ttsSpeak(entry.text, btn);
+  });
+
   window.addEventListener('popstate', (e) => {
+    ttsStop();
     if (e.state?.screen === 'settings') {
       showScreen('settings');
     } else if (e.state?.screen === 'main') {
@@ -773,6 +784,59 @@
 
   const PROVIDER_ICONS = { codex: '⚡', claude: '🟣', gemini: '✨' };
   function providerIcon(p) { return PROVIDER_ICONS[p] || '⚡'; }
+
+  // --- Text-to-speech ---
+  let _ttsBtn = null;
+
+  function ttsStripMarkdown(text) {
+    return text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`]+`/g, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/#{1,6}\s+/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function ttsDetectLang(text) {
+    const sv = /\b(och|att|som|det|är|på|för|med|av|en|ett|vi|du|jag|har|inte|var|den|till|om|kan|han|hon|de|men|eller|när|vad|hur|mer|också|bara|redan|efter|innan|sedan|detta|dessa)\b/i;
+    return sv.test(text) ? 'sv-SE' : 'en-US';
+  }
+
+  function ttsSpeak(text, btn) {
+    window.speechSynthesis.cancel();
+    if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
+    if (_ttsBtn === btn) { _ttsBtn = null; return; }
+
+    const clean = ttsStripMarkdown(text);
+    const lang = ttsDetectLang(clean);
+    const utt = new SpeechSynthesisUtterance(clean);
+    utt.lang = lang;
+
+    const voices = window.speechSynthesis.getVoices();
+    const voice = voices.find(v => v.lang === lang && v.localService)
+      || voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.localService)
+      || voices.find(v => v.lang.startsWith(lang.split('-')[0]));
+    if (voice) utt.voice = voice;
+
+    utt.onend = utt.onerror = () => {
+      if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
+      _ttsBtn = null;
+    };
+
+    _ttsBtn = btn;
+    btn.textContent = '⏹';
+    btn.classList.add('tts-active');
+    window.speechSynthesis.speak(utt);
+  }
+
+  function ttsStop() {
+    window.speechSynthesis.cancel();
+    if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
+    _ttsBtn = null;
+  }
 
   function esc(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

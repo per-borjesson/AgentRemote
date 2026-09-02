@@ -265,6 +265,7 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
 }
 .bubble.ai {
   align-self: flex-start;
+  flex-direction: column;
 }
 
 .bubble-text {
@@ -295,6 +296,20 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   margin-top: .3rem;
   text-align: right;
 }
+
+.tts-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: .75rem;
+  padding: .1rem .4rem .1rem .2rem;
+  cursor: pointer;
+  opacity: .6;
+  align-self: flex-start;
+  line-height: 1;
+}
+.tts-btn:hover { opacity: 1; }
+.tts-btn.tts-active { color: var(--accent); opacity: 1; }
 
 a.file-card {
   display: inline-flex;
