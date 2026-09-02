@@ -630,6 +630,13 @@
   // --- Back ---
   document.getElementById('back-btn').addEventListener('click', () => history.back());
 
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && _ttsBtn && window.speechSynthesis.speaking) {
+      window.speechSynthesis.pause();
+      window.speechSynthesis.resume();
+    }
+  });
+
   document.getElementById('output-container').addEventListener('click', e => {
     const btn = e.target.closest('.tts-btn');
     if (!btn) return;
@@ -811,28 +818,39 @@
     return text.match(/[^.!?\n]+[.!?\n]*/g)?.map(s => s.trim()).filter(Boolean) || [text];
   }
 
-  // Plays a near-silent MediaStream so Android/iOS treats this tab as a media
-  // app and keeps speechSynthesis running when the screen turns off.
+  // Generate a silent WAV data URL — looping <audio> with real content is what
+  // Android Chrome recognises as active media, preventing tab throttling when
+  // the screen turns off. A MediaStream is not enough on some Android builds.
+  function makeSilentWav(durationSec = 2, sampleRate = 8000) {
+    const n = durationSec * sampleRate;
+    const buf = new ArrayBuffer(44 + n);
+    const v = new DataView(buf);
+    const s = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    s(0, 'RIFF'); v.setUint32(4, 36 + n, true);
+    s(8, 'WAVE'); s(12, 'fmt '); v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate, true);
+    v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+    s(36, 'data'); v.setUint32(40, n, true);
+    let bin = ''; const u8 = new Uint8Array(buf);
+    for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+    return 'data:audio/wav;base64,' + btoa(bin);
+  }
+  const _silentSrc = makeSilentWav();
+
   function startSilentStream() {
     if (_silentEl) return;
     try {
-      _silentCtx = new AudioContext();
-      const dest = _silentCtx.createMediaStreamDestination();
-      const osc = _silentCtx.createOscillator();
-      const gain = _silentCtx.createGain();
-      gain.gain.setValueAtTime(0.00001, _silentCtx.currentTime);
-      osc.connect(gain);
-      gain.connect(dest);
-      osc.start();
       _silentEl = document.createElement('audio');
-      _silentEl.srcObject = dest.stream;
+      _silentEl.src = _silentSrc;
+      _silentEl.loop = true;
+      _silentEl.volume = 0.001;
       _silentEl.play().catch(() => {});
     } catch {}
   }
 
   function stopSilentStream() {
-    try { if (_silentEl) { _silentEl.pause(); _silentEl.srcObject = null; } } catch {}
-    try { if (_silentCtx) _silentCtx.close(); } catch {}
+    try { if (_silentEl) _silentEl.pause(); } catch {}
     _silentEl = null;
     _silentCtx = null;
   }
