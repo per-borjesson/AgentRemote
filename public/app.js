@@ -787,8 +787,8 @@
 
   // --- Text-to-speech ---
   let _ttsBtn = null;
-  let _ttsKeepAliveTimer = null;
-  let _audioCtx = null;
+  let _silentCtx = null;
+  let _silentEl = null;
 
   function ttsStripMarkdown(text) {
     return text
@@ -807,27 +807,39 @@
     return sv.test(text) ? 'sv-SE' : 'en-US';
   }
 
-  // Splits text into sentence-sized chunks so iOS doesn't cut off after ~15s
   function ttsChunks(text) {
     return text.match(/[^.!?\n]+[.!?\n]*/g)?.map(s => s.trim()).filter(Boolean) || [text];
   }
 
-  // Silent 1-sample audio ping — keeps iOS from suspending JS when screen locks
-  function ttsPing() {
+  // Plays a near-silent MediaStream so Android/iOS treats this tab as a media
+  // app and keeps speechSynthesis running when the screen turns off.
+  function startSilentStream() {
+    if (_silentEl) return;
     try {
-      if (!_audioCtx) _audioCtx = new AudioContext();
-      if (_audioCtx.state === 'suspended') _audioCtx.resume();
-      const buf = _audioCtx.createBuffer(1, 1, 22050);
-      const src = _audioCtx.createBufferSource();
-      src.buffer = buf;
-      src.connect(_audioCtx.destination);
-      src.start();
+      _silentCtx = new AudioContext();
+      const dest = _silentCtx.createMediaStreamDestination();
+      const osc = _silentCtx.createOscillator();
+      const gain = _silentCtx.createGain();
+      gain.gain.setValueAtTime(0.00001, _silentCtx.currentTime);
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start();
+      _silentEl = document.createElement('audio');
+      _silentEl.srcObject = dest.stream;
+      _silentEl.play().catch(() => {});
     } catch {}
+  }
+
+  function stopSilentStream() {
+    try { if (_silentEl) { _silentEl.pause(); _silentEl.srcObject = null; } } catch {}
+    try { if (_silentCtx) _silentCtx.close(); } catch {}
+    _silentEl = null;
+    _silentCtx = null;
   }
 
   function ttsSpeak(text, btn) {
     window.speechSynthesis.cancel();
-    clearInterval(_ttsKeepAliveTimer);
+    stopSilentStream();
     if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
     if (_ttsBtn === btn) { _ttsBtn = null; return; }
 
@@ -844,11 +856,8 @@
     btn.textContent = '⏹';
     btn.classList.add('tts-active');
 
-    // Ping every 10s to prevent iOS suspending JS when screen is off
-    ttsPing();
-    _ttsKeepAliveTimer = setInterval(ttsPing, 10000);
+    startSilentStream();
 
-    // Register lock-screen media controls
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({ title: 'AgentRemote', artist: 'Reading…' });
       navigator.mediaSession.setActionHandler('pause', ttsStop);
@@ -870,8 +879,7 @@
 
   function ttsStop() {
     window.speechSynthesis.cancel();
-    clearInterval(_ttsKeepAliveTimer);
-    _ttsKeepAliveTimer = null;
+    stopSilentStream();
     if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
     _ttsBtn = null;
   }
