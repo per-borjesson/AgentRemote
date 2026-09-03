@@ -275,6 +275,15 @@ export function killSession(name) {
   sessionMeta.delete(name);
 }
 
+// The background-tasks panel (opened by monitor events) shows "Enter to view"
+// and captures keyboard focus, blocking user input. Auto-dismiss it.
+export function dismissBackgroundPanel(name, output) {
+  const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
+  if (/↑\/↓ to select.*Enter to view.*Esc to close/.test(clean)) {
+    try { execSync(`tmux send-keys -t ${name} Escape`, { encoding: 'utf8' }); } catch {}
+  }
+}
+
 export function checkForApprovalPrompt(name, output = null) {
   const meta = sessionMeta.get(name) || {};
   const provider = getProvider(meta.provider);

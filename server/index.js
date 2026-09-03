@@ -13,6 +13,7 @@ import {
   setApprovalPending, respondToApproval, setSessionStatus,
   checkTmuxSizes, checkForResume, resumeSession,
   parseQuestionnaire, answerQuestionnaire, updateTokensFromOutput, updateProcessMemory,
+  dismissBackgroundPanel,
 } from './sessions.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
@@ -339,6 +340,7 @@ setInterval(() => {
     const output = captureOutput(session.name, isWatched ? 500 : 50);
     updateTokensFromOutput(session.name, output);
     updateProcessMemory(session.name);
+    dismissBackgroundPanel(session.name, output);
 
     // Stream output to subscribed clients (only when someone is watching)
     if (isWatched) {
