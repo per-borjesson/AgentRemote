@@ -9,15 +9,16 @@ import { execSync } from 'child_process';
 import multer from 'multer';
 import {
   listSessions, getSession, createSession, sendKeys,
-  captureOutput, killSession, checkForApprovalPrompt,
+  captureOutput, captureOutputAsync, killSession, checkForApprovalPrompt,
   setApprovalPending, respondToApproval, setSessionStatus,
-  checkTmuxSizes, checkForResume, resumeSession,
+  checkTmuxSizes, checkForResume, resumeSession, waitForResumeId,
   parseQuestionnaire, answerQuestionnaire, updateTokensFromOutput, updateProcessMemory,
-  dismissBackgroundPanel,
+  dismissBackgroundPanel, sendRawKeys,
 } from './sessions.js';
+import { listArchived, addArchived, removeArchived } from './archived.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
-import { readJsonlConversation } from './jsonl.js';
+import { readJsonlConversation, readJsonlHistory } from './jsonl.js';
 import { getSettings, saveSection, saveCustom, deleteCustom, saveAiProvider, deleteAiProvider, testTelegram, testEmail, startClaudeLogin, getClaudeStatus, startCodexLogin, getCodexOAuthStatus, readEnvFile } from './settings.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -79,11 +80,31 @@ app.get('/api/sessions/:name/output', (req, res) => {
   res.json({ output, conversation, jsonl });
 });
 
+app.get('/api/sessions/:name/jsonl/history', (req, res) => {
+  const session = getSession(req.params.name);
+  if (!session) return res.status(404).json({ error: 'not found' });
+  const before = parseInt(req.query.before) || 0;
+  const limit = Math.min(parseInt(req.query.limit) || 50, 100);
+  const result = readJsonlHistory(resolveWorkdir(session), { before, limit });
+  res.json(result || { conv: [], hasMore: false });
+});
+
 app.post('/api/sessions/:name/input', (req, res) => {
   const { text, enter } = req.body;
   addUserMessage(req.params.name, text);
   broadcast({ type: 'user_input', session: req.params.name, text: (text || '').trim() });
   sendKeys(req.params.name, text, enter !== false);
+  res.json({ ok: true });
+});
+
+app.post('/api/sessions/:name/keys', (req, res) => {
+  if (!getSession(req.params.name)) return res.status(404).json({ error: 'not found' });
+  const { keys, text } = req.body;
+  try {
+    sendRawKeys(req.params.name, { keys: Array.isArray(keys) ? keys : [], text: typeof text === 'string' ? text : '' });
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
   res.json({ ok: true });
 });
 
@@ -225,6 +246,54 @@ app.get('/api/file', (req, res) => {
   res.download(resolved, basename(resolved));
 });
 
+// Archive: send /exit, wait for resume ID, persist to disk, kill tmux
+app.post('/api/sessions/:name/archive', async (req, res) => {
+  const session = getSession(req.params.name);
+  if (!session) return res.status(404).json({ error: 'session not found' });
+  res.json({ ok: true }); // respond immediately; work continues in background
+  sendKeys(req.params.name, '/exit', true);
+  const resumeId = await waitForResumeId(req.params.name);
+  const entry = {
+    name: req.params.name,
+    resumeId: resumeId || null,
+    task: session.task,
+    provider: session.provider,
+    workdir: session.workdir,
+    archivedAt: Date.now(),
+  };
+  addArchived(entry);
+  killSession(req.params.name);
+  storedResponses.delete(req.params.name);
+  conversations.delete(req.params.name);
+  knownResumable.delete(req.params.name);
+  broadcast({ type: 'session_archived', entry, sessions: listSessions(), archived: listArchived() });
+});
+
+// List archived sessions
+app.get('/api/archived', (req, res) => res.json(listArchived()));
+
+// Resume an archived session — creates a fresh tmux pane and restores the conversation
+app.post('/api/archived/:name/resume', (req, res) => {
+  const entry = listArchived().find(e => e.name === req.params.name);
+  if (!entry) return res.status(404).json({ error: 'not found' });
+  try {
+    const session = createSession(entry.name, entry.task, entry.provider || 'claude', entry.workdir, entry.resumeId);
+    removeArchived(entry.name);
+    broadcast({ type: 'session_created', session, archived: listArchived() });
+    sendNotification(`▶ Session *${entry.name}* resumed`).catch(() => {});
+    res.json(session);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Delete an archived entry without resuming
+app.delete('/api/archived/:name', (req, res) => {
+  removeArchived(req.params.name);
+  broadcast({ type: 'sessions_update', sessions: listSessions(), archived: listArchived() });
+  res.json({ ok: true });
+});
+
 app.delete('/api/sessions/:name', (req, res) => {
   killSession(req.params.name);
   storedResponses.delete(req.params.name);
@@ -255,7 +324,7 @@ wss.on('connection', (ws, req) => {
   }
 
   clients.add(ws);
-  ws.send(JSON.stringify({ type: 'connected', sessions: listSessions(), version: VERSION }));
+  ws.send(JSON.stringify({ type: 'connected', sessions: listSessions(), archived: listArchived(), version: VERSION }));
 
   ws.on('message', (data) => {
     try {
@@ -329,34 +398,49 @@ function addUserMessage(name, text) {
   conversations.set(name, conv);
 }
 
-setInterval(() => {
+// Fast loop (2s) — watched sessions only: capture output and stream to UI.
+// One captureOutputAsync per watched session; idle cost is near-zero when
+// nobody has the browser open.
+setInterval(async () => {
   const sessions = listSessions();
-  for (const session of sessions) {
-    const prov = getProvider(session.provider);
-    const isWatched = [...clients].some(c => c.readyState === 1 && c._watchSession === session.name);
+  const watchedSessions = sessions.filter(s =>
+    [...clients].some(c => c.readyState === 1 && c._watchSession === s.name)
+  );
 
-    // Single capture per session per cycle — 500 lines for watched sessions
-    // (pane height 200 + buffer), 50 lines for unwatched (approval/resume checks only).
-    const output = captureOutput(session.name, isWatched ? 500 : 50);
+  await Promise.all(watchedSessions.map(async session => {
+    const prov = getProvider(session.provider);
+    const output = await captureOutputAsync(session.name, 500);
     updateTokensFromOutput(session.name, output);
-    updateProcessMemory(session.name);
     dismissBackgroundPanel(session.name, output);
 
-    // Stream output to subscribed clients (only when someone is watching)
-    if (isWatched) {
-      const incoming = prov.extractResponses(output);
-      mergeResponses(session.name, incoming);
-      const conversation = mergeConversation(session.name, incoming, prov);
-      const questionnaire = parseQuestionnaire(output);
-      const jsonl = session.provider === 'claude' ? readJsonlConversation(resolveWorkdir(session)) : null;
-      for (const client of clients) {
-        if (client.readyState === 1 && client._watchSession === session.name) {
-          client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation, questionnaire: questionnaire || null, jsonl }));
-        }
+    const incoming = prov.extractResponses(output);
+    mergeResponses(session.name, incoming);
+    const conversation = mergeConversation(session.name, incoming, prov);
+    const questionnaire = parseQuestionnaire(output);
+    const jsonl = session.provider === 'claude' ? readJsonlConversation(resolveWorkdir(session)) : null;
+    for (const client of clients) {
+      if (client.readyState === 1 && client._watchSession === session.name) {
+        client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation, questionnaire: questionnaire || null, jsonl }));
       }
     }
+  }));
 
-    // Check for pending approvals (reuse captured output)
+  broadcast({ type: 'sessions_update', sessions, archived: listArchived() });
+}, 2000);
+
+// Slow loop (30s) — all sessions: approval/resume detection, memory, token
+// updates. Telegram notifications tolerate up to 30s delay; this cuts
+// per-minute process spawns by ~10× compared to doing it in the fast loop.
+setInterval(async () => {
+  const sessions = listSessions();
+
+  await Promise.all(sessions.map(async session => {
+    const output = await captureOutputAsync(session.name, 50);
+    updateTokensFromOutput(session.name, output);
+    await updateProcessMemory(session.name);
+    dismissBackgroundPanel(session.name, output);
+
+    // Approvals
     if (!session.pendingApproval && checkForApprovalPrompt(session.name, output)) {
       if (!knownApprovals.has(session.name)) {
         knownApprovals.add(session.name);
@@ -368,7 +452,7 @@ setInterval(() => {
       knownApprovals.delete(session.name);
     }
 
-    // Check for Claude exit with resume ID (reuse captured output)
+    // Resume
     const resumeId = checkForResume(session.name, output);
     if (resumeId && !knownResumable.has(session.name)) {
       knownResumable.add(session.name);
@@ -377,11 +461,8 @@ setInterval(() => {
     } else if (!resumeId) {
       knownResumable.delete(session.name);
     }
-  }
-
-  // Broadcast session list update to all clients
-  broadcast({ type: 'sessions_update', sessions });
-}, 2000);
+  }));
+}, 30000);
 
 // Telegram — read from canonical ~/.secrets/telegram.env, fall back to .env
 {

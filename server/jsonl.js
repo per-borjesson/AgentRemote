@@ -18,7 +18,7 @@ function activeJsonl(projectPath) {
   } catch { return null; }
 }
 
-export function readJsonlConversation(workdir) {
+function buildConv(workdir) {
   const dir = projectDir(workdir);
   if (!dir) return null;
   const file = activeJsonl(dir);
@@ -103,4 +103,24 @@ export function readJsonlConversation(workdir) {
   }
 
   return { conv, status };
+}
+
+// Returns the most recent `tail` messages plus pagination metadata.
+export function readJsonlConversation(workdir, { tail = 20 } = {}) {
+  const result = buildConv(workdir);
+  if (!result) return null;
+  const { conv, status } = result;
+  const total = conv.length;
+  const hasMore = total > tail;
+  return { conv: hasMore ? conv.slice(-tail) : conv, total, hasMore, status };
+}
+
+// Returns up to `limit` messages ending at index `before` (exclusive).
+export function readJsonlHistory(workdir, { before, limit = 50 } = {}) {
+  const result = buildConv(workdir);
+  if (!result) return null;
+  const { conv } = result;
+  const end = Math.min(Math.max(before, 0), conv.length);
+  const start = Math.max(0, end - limit);
+  return { conv: conv.slice(start, end), hasMore: start > 0 };
 }

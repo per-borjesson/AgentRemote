@@ -62,7 +62,7 @@
   function handleMessage(msg) {
     if (msg.type === 'connected') {
       const el = document.getElementById('server-version');
-      if (el) el.textContent = `v20260524-1 · srv ${msg.version || '?'}`;
+      if (el) el.textContent = `v20261017-1 · srv${msg.version || '?'}`;
       // Re-subscribe after reconnect so output resumes without re-entering the session
       if (currentSession) {
         ws.send(JSON.stringify({ type: 'subscribe_output', session: currentSession }));
@@ -70,10 +70,19 @@
       }
     }
     if (msg.type === 'connected' || msg.type === 'sessions_update') {
-      renderSessionList(msg.sessions);
+      renderSessionList(msg.sessions, msg.archived);
     }
     if (msg.type === 'session_created') {
-      renderSessionList(null);
+      renderSessionList(msg.sessions || null, msg.archived || null);
+    }
+    if (msg.type === 'session_archived') {
+      renderSessionList(msg.sessions, msg.archived);
+      // If user is looking at the archived session, navigate back to main
+      if (msg.entry?.name === currentSession) {
+        history.replaceState({ screen: 'main' }, '');
+        currentSession = null;
+        showScreen('main');
+      }
     }
     if (msg.type === 'output' && msg.session === currentSession) {
       if (msg.conversation) {
@@ -85,7 +94,7 @@
         conversation = [...msg.conversation, ...pending];
         if (viewMode === 'chat') renderChat();
       }
-      if (msg.jsonl) { lastJsonlData = msg.jsonl; if (viewMode === 'jsonl') scheduleJsonlRender(msg.jsonl); }
+      if (msg.jsonl) { lastJsonlData = msg.jsonl; if (viewMode === 'jsonl') scheduleJsonlRender(msg.jsonl, false); }
       if (viewMode === 'markdown') renderMarkdownView(msg.output);
       renderOutput(msg.output);
       if (msg.questionnaire) showQuestionnaireBanner(msg.questionnaire);
@@ -118,13 +127,15 @@
 
   // --- Session list ---
   let _sessions = [];
+  let _archived = [];
 
-  function renderSessionList(sessions) {
+  function renderSessionList(sessions, archived) {
     if (sessions) _sessions = sessions;
+    if (archived) _archived = archived;
     const list = document.getElementById('session-list');
     const empty = document.getElementById('empty-state');
 
-    if (!_sessions.length) {
+    if (!_sessions.length && !_archived.length) {
       list.innerHTML = '';
       empty.classList.remove('hidden');
       return;
@@ -132,7 +143,8 @@
 
     empty.classList.add('hidden');
     const sorted = [..._sessions].sort((a, b) => b.activity - a.activity);
-    list.innerHTML = sorted.map(s => `
+
+    const activeHtml = sorted.map(s => `
       <div class="session-card" data-name="${s.name}">
         <div class="status-dot ${s.status}"></div>
         <div class="info">
@@ -147,14 +159,66 @@
       </div>
     `).join('');
 
-    list.querySelectorAll('.session-card').forEach(card => {
+    const archivedHtml = _archived.length ? `
+      <div class="archived-section-title">Archived</div>
+      ${_archived.map(a => `
+        <div class="session-card archived">
+          <div class="status-dot"></div>
+          <div class="info">
+            <div class="name">${esc(a.name)} <span class="provider-badge">${esc(providerIcon(a.provider))}</span></div>
+            <div class="task">${esc(a.task || '—')}</div>
+          </div>
+          <div class="session-right">
+            <div class="session-age">${timeAgo(a.archivedAt)}</div>
+            <div style="display:flex;gap:.3rem;margin-top:.1rem">
+              ${a.resumeId ? `<button class="archived-resume-btn" data-name="${esc(a.name)}">▶ Resume</button>` : ''}
+              <button class="archived-delete-btn" data-name="${esc(a.name)}" title="Delete">✕</button>
+            </div>
+          </div>
+        </div>
+      `).join('')}
+    ` : '';
+
+    list.innerHTML = activeHtml + archivedHtml;
+
+    list.querySelectorAll('.session-card:not(.archived)').forEach(card => {
       card.addEventListener('click', () => openSession(card.dataset.name));
+    });
+    list.querySelectorAll('.archived-resume-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        btn.textContent = '…';
+        btn.disabled = true;
+        const res = await api('POST', `/api/archived/${encodeURIComponent(btn.dataset.name)}/resume`);
+        if (res) {
+          await refreshSessions();
+          openSession(btn.dataset.name);
+        } else {
+          btn.textContent = '▶ Resume';
+          btn.disabled = false;
+        }
+      });
+    });
+    list.querySelectorAll('.archived-delete-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const name = btn.dataset.name;
+        openKillSheet({
+          title: name,
+          confirmLabel: 'Delete permanently',
+          showArchive: false,
+          onConfirm: () => api('DELETE', `/api/archived/${encodeURIComponent(name)}`),
+        });
+      });
     });
   }
 
   async function refreshSessions() {
-    const res = await api('GET', '/api/sessions');
-    if (res) renderSessionList(res);
+    const [sessions, archived] = await Promise.all([
+      api('GET', '/api/sessions'),
+      api('GET', '/api/archived'),
+    ]);
+    renderSessionList(sessions, archived);
   }
 
   // --- Open session ---
@@ -164,6 +228,9 @@
     conversation = [];
     lastChatKey = '';
     lastOutputText = '';
+    _jsonlHistory = [];
+    _jsonlHasMore = false;
+    _jsonlHistoryFrom = 0;
     const session = _sessions.find(s => s.name === name);
     document.getElementById('session-title').textContent = name;
     const wdEl = document.getElementById('session-workdir');
@@ -201,7 +268,15 @@
       conversation = res.conversation;
       if (viewMode === 'chat') renderChat();
     }
-    if (res.jsonl) { lastJsonlData = res.jsonl; if (viewMode === 'jsonl') scheduleJsonlRender(res.jsonl); }
+    if (res.jsonl) {
+      lastJsonlData = res.jsonl;
+      // Initialize history pagination state (only on fresh open; history stays if already loaded)
+      if (_jsonlHistory.length === 0) {
+        _jsonlHasMore = res.jsonl.hasMore || false;
+        _jsonlHistoryFrom = (res.jsonl.total || res.jsonl.conv.length) - res.jsonl.conv.length;
+      }
+      if (viewMode === 'jsonl') scheduleJsonlRender(res.jsonl);
+    }
     if (viewMode === 'markdown') renderMarkdownView(res.output);
     renderOutput(res.output);
   }
@@ -235,6 +310,7 @@
     if (key === lastChatKey) return;
     if (window.getSelection()?.toString()) return;
     lastChatKey = key;
+    clearHtmlPreviews();
     const el = document.getElementById('chat-view');
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
@@ -255,8 +331,15 @@
     const parts = text.split(/(```[\s\S]*?```)/g);
     const html = parts.map((part, i) => {
       if (i % 2 === 1) {
+        const langMatch = part.slice(3).match(/^([^\n]*)\n/);
+        const lang = langMatch ? langMatch[1].trim().toLowerCase() : '';
         const inner = part.slice(3, -3).replace(/^[^\n]*\n/, '');
-        return `<pre class="code-block"><code>${esc(inner)}</code></pre>`;
+        if (lang === 'html') {
+          const id = `hp-${++_htmlPreviewCounter}`;
+          _htmlPreviewMap.set(id, inner);
+          return `<div class="html-preview-block"><div class="html-preview-bar"><span class="html-lang-badge">HTML</span><button class="copy-btn" data-preview-id="${id}" title="Copy">⎘</button><button class="html-preview-btn" data-preview-id="${id}">▶ Preview</button></div><pre class="code-block"><code>${esc(inner)}</code></pre></div>`;
+        }
+        return `<div class="code-block-wrap"><button class="copy-btn" title="Copy">⎘</button><pre class="code-block"><code>${esc(inner)}</code></pre></div>`;
       }
       // Process prose: split into paragraphs, then handle block-level elements
       return part.split(/\n\n+/).map(para => {
@@ -392,12 +475,71 @@
     if (atBottom) c.scrollTop = c.scrollHeight;
   }
 
+  // --- HTML preview (sandboxed iframe for ```html blocks) ---
+  let _htmlPreviewCounter = 0;
+  const _htmlPreviewMap = new Map();
+
+  function clearHtmlPreviews() {
+    _htmlPreviewCounter = 0;
+    _htmlPreviewMap.clear();
+  }
+
+  function toggleHtmlPreview(btn) {
+    const id = btn.dataset.previewId;
+    const block = btn.closest('.html-preview-block');
+    if (!block) return;
+    if (block.classList.contains('showing-preview')) {
+      const iframe = block.querySelector('.html-preview-frame');
+      const pre = document.createElement('pre');
+      pre.className = 'code-block';
+      const code = document.createElement('code');
+      code.textContent = _htmlPreviewMap.get(id) || '';
+      pre.appendChild(code);
+      iframe.replaceWith(pre);
+      block.classList.remove('showing-preview');
+      btn.textContent = '▶ Preview';
+    } else {
+      const html = _htmlPreviewMap.get(id);
+      if (!html) return;
+      const iframe = document.createElement('iframe');
+      iframe.setAttribute('sandbox', 'allow-same-origin allow-forms');
+      iframe.className = 'html-preview-frame';
+      iframe.srcdoc = html;
+      iframe.onload = () => {
+        try {
+          const h = iframe.contentDocument.body.scrollHeight;
+          if (h > 0) iframe.style.height = (h + 20) + 'px';
+        } catch {}
+      };
+      block.querySelector('.code-block').replaceWith(iframe);
+      block.classList.add('showing-preview');
+      btn.textContent = '◀ Source';
+    }
+  }
+
   // --- JSONL view (native Claude conversation from ~/.claude/projects/) ---
   let _jsonlFp = null;
   let _jsonlIdlePending = false;
+  // After an optimistic render, block stale data from reverting it.
+  let _jsonlMinLen = 0;
+  let _jsonlMinLenExpiry = 0;
+  // Lazy pagination: history loaded by tapping "↑ Load earlier"
+  let _jsonlHistory = [];      // older entries prepended by user action
+  let _jsonlHasMore = false;   // server has entries before the current tail
+  let _jsonlHistoryFrom = 0;   // conv index of the oldest entry we've loaded (for next fetch)
 
-  function scheduleJsonlRender(data) {
+  function scheduleJsonlRender(data, resetFp = false) {
+    if (_jsonlMinLen > 0) {
+      if (Date.now() > _jsonlMinLenExpiry) {
+        _jsonlMinLen = 0; // guard expired (safety valve)
+      } else if (data && data.conv.length < _jsonlMinLen) {
+        return; // JSONL file hasn't caught up with optimistic render yet
+      } else {
+        _jsonlMinLen = 0; // file caught up — lift the guard
+      }
+    }
     lastJsonlData = data;
+    if (resetFp) _jsonlFp = null; // force re-render (e.g. after loading history)
     if (_jsonlIdlePending) return;
     _jsonlIdlePending = true;
     requestIdleCallback(() => {
@@ -416,10 +558,11 @@
 
     // Skip if data hasn't meaningfully changed since last render.
     const fp = data
-      ? `${data.conv.length}:${data.status}:${data.conv.at(-1)?.text?.length ?? 0}`
+      ? `${_jsonlHistory.length}:${data.conv.length}:${data.status}:${data.conv.at(-1)?.text?.length ?? 0}`
       : 'null';
     if (fp === _jsonlFp) return;
     _jsonlFp = fp;
+    clearHtmlPreviews();
 
     const c = document.getElementById('output-container');
     const atBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 60;
@@ -429,9 +572,14 @@
       return;
     }
 
-    const { conv, status } = data;
+    const { status } = data;
+    const fullConv = _jsonlHistory.concat(data.conv);
 
-    const bubbles = conv.map((entry, i) => {
+    const loadEarlierHtml = _jsonlHasMore
+      ? '<button class="jsonl-load-earlier" id="jsonl-load-earlier-btn">↑ Load earlier messages</button>'
+      : '';
+
+    const bubbles = fullConv.map((entry, i) => {
       const ts = entry.ts ? `<span class="bubble-time">${formatMsgTime(entry.ts)}</span>` : '';
       if (entry.role === 'user') {
         return `<div class="bubble user"><div class="bubble-text">${escNl(entry.text)}${ts}</div></div>`;
@@ -448,9 +596,40 @@
         ? '<div class="jsonl-status">Working…</div>'
         : '';
 
-    el.innerHTML = bubbles + statusHtml;
+    el.innerHTML = loadEarlierHtml + bubbles + statusHtml;
     if (atBottom) c.scrollTop = c.scrollHeight;
   }
+
+  async function loadJsonlHistory() {
+    const btn = document.getElementById('jsonl-load-earlier-btn');
+    if (btn) { btn.textContent = '↑ Loading…'; btn.disabled = true; }
+
+    const res = await api('GET', `/api/sessions/${currentSession}/jsonl/history?before=${_jsonlHistoryFrom}&limit=50`);
+    if (!res || !res.conv.length) {
+      if (btn) { btn.textContent = '↑ Load earlier messages'; btn.disabled = false; }
+      return;
+    }
+
+    // Preserve scroll position when prepending
+    const c = document.getElementById('output-container');
+    const oldScrollHeight = c.scrollHeight;
+    const oldScrollTop = c.scrollTop;
+
+    _jsonlHistory = res.conv.concat(_jsonlHistory);
+    _jsonlHistoryFrom = Math.max(0, _jsonlHistoryFrom - res.conv.length);
+    _jsonlHasMore = res.hasMore;
+
+    scheduleJsonlRender(lastJsonlData, true);
+
+    // Restore scroll position after render (requestIdleCallback delays apply)
+    requestAnimationFrame(() => {
+      c.scrollTop = oldScrollTop + (c.scrollHeight - oldScrollHeight);
+    });
+  }
+
+  document.getElementById('jsonl-view').addEventListener('click', e => {
+    if (e.target.id === 'jsonl-load-earlier-btn') loadJsonlHistory();
+  });
 
   // --- Questionnaire banner ---
   const qBanner = document.getElementById('questionnaire-banner');
@@ -551,11 +730,44 @@
     }
     if (viewMode === 'jsonl' && lastJsonlData) {
       const optimistic = { ...lastJsonlData, conv: [...lastJsonlData.conv, { role: 'user', text, ts: Date.now() }], status: 'thinking' };
+      _jsonlMinLen = optimistic.conv.length;
+      _jsonlMinLenExpiry = Date.now() + 10000;
       renderJsonlView(optimistic);
     }
 
     await api('POST', `/api/sessions/${currentSession}/input`, { text, enter: true });
   }
+
+  // --- Key bar: raw keystrokes straight to the tmux pane ---
+  const KEYBAR_KEY = 'keybarOpen';
+  const keyBar = document.getElementById('key-bar');
+  const keysToggleBtn = document.getElementById('keys-toggle-btn');
+  function setKeyBar(open) {
+    keyBar.classList.toggle('hidden', !open);
+    keysToggleBtn.classList.toggle('active', open);
+    try { localStorage.setItem(KEYBAR_KEY, open ? '1' : ''); } catch {}
+  }
+  try { setKeyBar(!!localStorage.getItem(KEYBAR_KEY)); } catch {}
+  keysToggleBtn.addEventListener('click', () => setKeyBar(keyBar.classList.contains('hidden')));
+
+  async function sendRawKeys(body) {
+    if (!currentSession) return;
+    await api('POST', `/api/sessions/${currentSession}/keys`, body);
+    setTimeout(() => currentSession && fetchOutput(currentSession), 250);
+  }
+  // preventDefault on pointerdown keeps the textarea focused (and the keyboard up)
+  keyBar.addEventListener('pointerdown', e => { if (e.target.closest('button')) e.preventDefault(); });
+  keyBar.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-keys]');
+    if (btn) sendRawKeys({ keys: btn.dataset.keys.split(' ') });
+  });
+  document.getElementById('key-type-btn').addEventListener('click', () => {
+    const text = inputEl.value;
+    if (!text) return;
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    sendRawKeys({ text });
+  });
 
   // --- File upload ---
   const uploadBtn = document.getElementById('upload-btn');
@@ -606,25 +818,67 @@
     input.focus();
   });
 
-  // --- Kill session ---
+  // --- Session action sheet (archive / kill / delete-archived) ---
   const killSheet = document.getElementById('kill-sheet');
-  document.getElementById('kill-btn').addEventListener('click', () => {
-    document.getElementById('kill-sheet-name').textContent = `"${currentSession}" will be destroyed and cannot be recovered.`;
+  const archiveBtn = document.getElementById('archive-confirm-btn');
+  const killConfirmBtn = document.getElementById('kill-confirm-btn');
+
+  // Overridable confirm action — null means default "kill active session" behaviour.
+  let _killConfirmAction = null;
+
+  function openKillSheet({ title, confirmLabel, showArchive, onConfirm }) {
+    document.getElementById('kill-sheet-name').textContent = title;
+    killConfirmBtn.textContent = confirmLabel;
+    archiveBtn.classList.toggle('hidden', !showArchive);
+    _killConfirmAction = onConfirm || null;
     killSheet.classList.remove('hidden');
-  });
-  document.getElementById('kill-cancel-btn').addEventListener('click', () => {
+  }
+
+  function closeKillSheet() {
     killSheet.classList.add('hidden');
+    _killConfirmAction = null;
+    killConfirmBtn.textContent = 'Kill session';
+    archiveBtn.classList.remove('hidden');
+  }
+
+  document.getElementById('kill-btn').addEventListener('click', () => {
+    openKillSheet({
+      title: currentSession,
+      confirmLabel: 'Kill session',
+      showArchive: true,
+      onConfirm: null, // handled below as default
+    });
   });
-  document.getElementById('kill-confirm-btn').addEventListener('click', async () => {
-    killSheet.classList.add('hidden');
+
+  document.getElementById('kill-cancel-btn').addEventListener('click', closeKillSheet);
+
+  archiveBtn.addEventListener('click', async () => {
+    closeKillSheet();
+    const name = currentSession;
+    history.replaceState({ screen: 'main' }, '');
+    currentSession = null;
+    showScreen('main');
+    await api('POST', `/api/sessions/${name}/archive`);
+  });
+
+  killConfirmBtn.addEventListener('click', async () => {
+    if (_killConfirmAction) {
+      const action = _killConfirmAction;
+      closeKillSheet();
+      await action();
+      return;
+    }
+    // Default: kill the active session
+    closeKillSheet();
     await api('DELETE', `/api/sessions/${currentSession}`);
     history.replaceState({ screen: 'main' }, '');
     currentSession = null;
     showScreen('main');
     refreshSessions();
   });
+
   killSheet.addEventListener('click', (e) => {
-    if (e.target === killSheet) killSheet.classList.add('hidden');
+    if (e.target === killSheet) closeKillSheet();
   });
 
   // --- Back ---
@@ -638,12 +892,34 @@
   });
 
   document.getElementById('output-container').addEventListener('click', e => {
+    const previewBtn = e.target.closest('.html-preview-btn');
+    if (previewBtn) { toggleHtmlPreview(previewBtn); return; }
+
+    const copyBtn = e.target.closest('.copy-btn');
+    if (copyBtn) {
+      const previewId = copyBtn.dataset.previewId;
+      const text = previewId
+        ? (_htmlPreviewMap.get(previewId) || '')
+        : (copyBtn.closest('.code-block-wrap')?.querySelector('code')?.textContent || '');
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.textContent = '✓';
+        copyBtn.classList.add('copied');
+        setTimeout(() => { copyBtn.textContent = '⎘'; copyBtn.classList.remove('copied'); }, 1500);
+      }).catch(() => {});
+      return;
+    }
+
     const btn = e.target.closest('.tts-btn');
     if (!btn) return;
     const idx = parseInt(btn.dataset.idx);
-    const entry = btn.dataset.view === 'jsonl'
-      ? lastJsonlData?.conv[idx]
-      : conversation[idx];
+    let entry;
+    if (btn.dataset.view === 'jsonl') {
+      // idx is into the full combined array (history + tail)
+      const fullConv = _jsonlHistory.concat(lastJsonlData?.conv || []);
+      entry = fullConv[idx];
+    } else {
+      entry = conversation[idx];
+    }
     if (entry?.text) ttsSpeak(entry.text, btn);
   });
 

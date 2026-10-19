@@ -1,4 +1,4 @@
-import { execSync, exec } from 'child_process';
+import { execSync, execFileSync, exec } from 'child_process';
 import { promisify } from 'util';
 import { getProvider, DEFAULT_PROVIDER } from './providers.js';
 
@@ -70,15 +70,17 @@ export function listSessions() {
     });
 }
 
-export function updateProcessMemory(name) {
+export async function updateProcessMemory(name) {
   try {
-    const shellPid = tmux('display-message', '-p', '-t', name, '-F', '"#{pane_pid}"');
+    const shellPid = await tmuxAsync('display-message', '-p', '-t', name, '-F', '"#{pane_pid}"');
     let pid = shellPid;
     try {
-      const child = execSync(`pgrep -P ${shellPid}`, { encoding: 'utf8' }).trim().split('\n')[0];
+      const { stdout: pgrepOut } = await execAsync(`pgrep -P ${shellPid}`);
+      const child = pgrepOut.trim().split('\n')[0];
       if (child) pid = child;
     } catch {}
-    const rssKb = parseInt(execSync(`ps -o rss= -p ${pid}`, { encoding: 'utf8' }).trim(), 10);
+    const { stdout: psOut } = await execAsync(`ps -o rss= -p ${pid}`);
+    const rssKb = parseInt(psOut.trim(), 10);
     if (!isNaN(rssKb)) {
       const meta = sessionMeta.get(name) || {};
       meta.memory = Math.round(rssKb / 1024);
@@ -142,7 +144,19 @@ export function getSession(name) {
   return listSessions().find(s => s.name === name) || null;
 }
 
-export function createSession(name, task = null, provider = DEFAULT_PROVIDER, workdir = null) {
+// Poll for a resume ID after sending /exit — resolves once Claude exits and
+// prints the ID, or returns null after timeoutMs if it never appears.
+export async function waitForResumeId(name, timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2000));
+    const id = checkForResume(name);
+    if (id) return id;
+  }
+  return null;
+}
+
+export function createSession(name, task = null, provider = DEFAULT_PROVIDER, workdir = null, resumeId = null) {
   // Default: ~/agents/<name> — each session gets its own isolated folder
   const dir = workdir || `${process.env.HOME}/agents/${name}`;
   execSync(`mkdir -p ${JSON.stringify(dir)}`);
@@ -152,10 +166,17 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
     if (!e.message.includes('duplicate session')) throw e;
   }
   sessionMeta.set(name, { task, provider, workdir: dir, status: 'running', pendingApproval: null });
-  const cmd = getProvider(provider).launch(task);
-  sendKeys(name, cmd, true);
-  // Claude defaults to high effort — set normal so it doesn't over-think and spam tool-call messages
-  if (provider === 'claude') {
+  // Clear host-managed auth vars that would prevent standalone Claude from
+  // using ~/.claude/.credentials.json (injected when tmux is started from a
+  // Claude Desktop context and inherited by every new pane).
+  sendKeys(name, 'unset ANTHROPIC_API_KEY CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST', true);
+  const cmd = resumeId
+    ? `claude --resume ${resumeId} --dangerously-skip-permissions`
+    : getProvider(provider).launch(task);
+  // 800ms: enough for the unset Enter (~300ms) to land and the shell to process it
+  setTimeout(() => sendKeys(name, cmd, true), 800);
+  // /effort auto only for fresh sessions — resumed sessions keep their prior setting
+  if (provider === 'claude' && !resumeId) {
     setTimeout(() => sendKeys(name, '/effort auto', true), 15000);
   }
   // Codex may show an update prompt on startup; auto-skip it — running the update
@@ -176,7 +197,8 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
           return;
         }
         if (/Do you trust the contents of this directory/i.test(out)) {
-          // Cursor starts on "Yes, continue" (option 1); Enter accepts it
+          // Cursor starts on "No, exit" (option 1); Down moves to "Yes, I trust this folder"
+          execSync(`tmux send-keys -t ${name} Down`, { encoding: 'utf8' });
           setTimeout(() => execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' }), 100);
           clearInterval(handle);
           return;
@@ -188,7 +210,7 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
   return getSession(name);
 }
 
-export function sendKeys(name, keys, enter = false) {
+export async function sendKeys(name, keys, enter = false) {
   if (keys.includes('\n')) {
     // Multi-line: use bracketed paste so newlines are literal characters in
     // the input widget rather than triggering premature submission.
@@ -198,8 +220,20 @@ export function sendKeys(name, keys, enter = false) {
     execSync(`tmux send-keys -t ${name} -l ${JSON.stringify(keys)}`, { encoding: 'utf8' });
   }
   if (enter) {
-    setTimeout(() => execSync(`tmux send-keys -t ${name} Enter`, { encoding: 'utf8' }), 300);
+    await new Promise(r => setTimeout(r, 300));
+    await execAsync(`tmux send-keys -t ${name} Enter`);
   }
+}
+
+// Send raw keystrokes (tmux key names like Escape, BTab, C-c, Up) and/or literal
+// text with no trailing Enter. Key names are whitelisted; execFileSync avoids the shell.
+const RAW_KEY_RE = /^(?:[CMS]-)*(?:[A-Za-z0-9]|Escape|Enter|Tab|BTab|BSpace|Space|Up|Down|Left|Right|Home|End|PageUp|PageDown|DC|IC|F(?:[1-9]|1[0-2]))$/;
+
+export function sendRawKeys(name, { keys = [], text = '' } = {}) {
+  const bad = keys.find(k => typeof k !== 'string' || !RAW_KEY_RE.test(k));
+  if (bad !== undefined) throw new Error(`invalid key: ${bad}`);
+  if (text) execFileSync('tmux', ['send-keys', '-t', name, '-l', text]);
+  if (keys.length) execFileSync('tmux', ['send-keys', '-t', name, ...keys]);
 }
 
 // Parse Claude Code's interactive multi-choice questionnaire from captured output.
@@ -263,6 +297,14 @@ export function answerQuestionnaire(name, targetIdx) {
 export function captureOutput(name, lines = 100) {
   try {
     return tmux('capture-pane', '-t', name, '-p', '-S', `-${lines}`);
+  } catch {
+    return '';
+  }
+}
+
+export async function captureOutputAsync(name, lines = 100) {
+  try {
+    return await tmuxAsync('capture-pane', '-t', name, '-p', '-S', `-${lines}`);
   } catch {
     return '';
   }

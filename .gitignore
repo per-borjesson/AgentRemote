@@ -1,3 +1,5 @@
 node_modules/
 .env
 *.log
+server/archived.json
+server/archived.json.bak

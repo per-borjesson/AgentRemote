@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0d1117">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="stylesheet" href="/style.css?v=20260902-4">
+  <link rel="stylesheet" href="/style.css?v=20261017-1">
 </head>
 <body>
   <div id="app">
@@ -25,7 +25,7 @@
       <header>
         <div class="header-title">
           <h1>Sessions</h1>
-          <span id="server-version" class="workdir">v20260902-4</span>
+          <span id="server-version" class="workdir">v20261017-1</span>
         </div>
         <button id="install-btn" class="icon-btn hidden" title="Install app">⬇</button>
         <button id="load-session-btn" class="icon-btn" title="Load workspace">📂</button>
@@ -77,7 +77,27 @@
         <pre id="output" class="hidden"></pre>
       </div>
 
+      <div id="key-bar" class="hidden">
+        <button data-keys="Escape">Esc</button>
+        <button data-keys="Tab">Tab</button>
+        <button data-keys="BTab">⇧Tab</button>
+        <button data-keys="Up">↑</button>
+        <button data-keys="Down">↓</button>
+        <button data-keys="Left">←</button>
+        <button data-keys="Right">→</button>
+        <button data-keys="Enter">⏎</button>
+        <button data-keys="BSpace">⌫</button>
+        <button data-keys="Space">Space</button>
+        <button data-keys="C-c">^C</button>
+        <button data-keys="C-d">^D</button>
+        <button data-keys="C-o">^O</button>
+        <button data-keys="C-r">^R</button>
+        <button data-keys="C-l">^L</button>
+        <button id="key-type-btn" title="Type the input text without pressing Enter">Type</button>
+      </div>
+
       <div id="input-bar">
+        <button id="keys-toggle-btn" class="icon-btn" title="Show key bar">⌘</button>
         <button id="upload-btn" class="icon-btn" title="Upload file">📎</button>
         <input id="upload-input" type="file" multiple style="display:none">
         <textarea id="input-text" rows="1" placeholder="Message… (Ctrl+Enter to send)" enterkeyhint="enter"></textarea>
@@ -310,13 +330,13 @@
 
   <div id="kill-sheet" class="sheet hidden">
     <div class="sheet-box">
-      <p class="sheet-title">Kill session?</p>
-      <p id="kill-sheet-name" class="sheet-msg"></p>
+      <p class="sheet-title" id="kill-sheet-name"></p>
+      <button id="archive-confirm-btn" class="sheet-safe">📦 Archive session</button>
       <button id="kill-confirm-btn" class="sheet-danger">Kill session</button>
       <button id="kill-cancel-btn" class="sheet-cancel">Cancel</button>
     </div>
   </div>
 
-  <script src="/app.js?v=20260902-4"></script>
+  <script src="/app.js?v=20261017-1"></script>
 </body>
 </html>
