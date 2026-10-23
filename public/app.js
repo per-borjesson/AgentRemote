@@ -45,17 +45,40 @@
   }
 
   // --- WebSocket ---
+  let _wsCreated = 0; // TEMP DEBUG
+  let _wsReconnectTimer = null;
+  let _wsLastMsgAt = Date.now();
+  // The server sends sessions_update every 2s; silence means a half-dead socket
+  // (common after a phone wakes up) — drop it and reconnect.
+  setInterval(() => {
+    if (document.hidden || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - _wsLastMsgAt > 10000) {
+      const stale = ws; ws = null; stale.close();
+      connectWS();
+    }
+  }, 5000);
   function connectWS() {
+    // One socket at a time: an old socket left open keeps delivering stale
+    // (late, queued) frames that overwrite fresh state in the UI.
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+    clearTimeout(_wsReconnectTimer);
+    _wsCreated++;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}?token=${encodeURIComponent(token)}`);
+    const sock = new WebSocket(`${proto}://${location.host}?token=${encodeURIComponent(token)}`);
+    ws = sock;
+    _wsLastMsgAt = Date.now();
 
-    ws.addEventListener('message', (e) => {
+    sock.addEventListener('message', (e) => {
+      if (sock !== ws) { sock.close(); return; } // superseded socket — ignore its frames
+      _wsLastMsgAt = Date.now();
       const msg = JSON.parse(e.data);
       handleMessage(msg);
     });
 
-    ws.addEventListener('close', () => {
-      setTimeout(connectWS, 3000);
+    sock.addEventListener('close', () => {
+      if (sock !== ws) return;
+      clearTimeout(_wsReconnectTimer);
+      _wsReconnectTimer = setTimeout(connectWS, 3000);
     });
   }
 
@@ -94,7 +117,7 @@
         conversation = [...msg.conversation, ...pending];
         if (viewMode === 'chat') renderChat();
       }
-      if (msg.jsonl) { lastJsonlData = msg.jsonl; if (viewMode === 'jsonl') scheduleJsonlRender(msg.jsonl, false); }
+      if (msg.jsonl) { lastJsonlData = msg.jsonl; _jsonlSrc = 'ws'; if (viewMode === 'jsonl') scheduleJsonlRender(msg.jsonl, false); }
       if (viewMode === 'markdown') renderMarkdownView(msg.output);
       renderOutput(msg.output);
       if (msg.questionnaire) showQuestionnaireBanner(msg.questionnaire);
@@ -275,7 +298,7 @@
         _jsonlHasMore = res.jsonl.hasMore || false;
         _jsonlHistoryFrom = (res.jsonl.total || res.jsonl.conv.length) - res.jsonl.conv.length;
       }
-      if (viewMode === 'jsonl') scheduleJsonlRender(res.jsonl);
+      _jsonlSrc = 'http'; if (viewMode === 'jsonl') scheduleJsonlRender(res.jsonl);
     }
     if (viewMode === 'markdown') renderMarkdownView(res.output);
     renderOutput(res.output);
@@ -296,7 +319,7 @@
     btn.textContent = VIEW_ICONS[mode];
     btn.title = VIEW_TITLES[mode];
     if (mode === 'chat') renderChat();
-    if (mode === 'jsonl') renderJsonlView(lastJsonlData);
+    if (mode === 'jsonl') { _jsonlSrc = 'view'; renderJsonlView(lastJsonlData); }
     if (mode === 'markdown' && lastOutputText) renderMarkdownView(lastOutputText);
   }
 
@@ -519,6 +542,7 @@
 
   // --- JSONL view (native Claude conversation from ~/.claude/projects/) ---
   let _jsonlFp = null;
+  let _jsonlSrc = '?'; // TEMP DEBUG
   let _jsonlIdlePending = false;
   // After an optimistic render, block stale data from reverting it.
   let _jsonlMinLen = 0;
@@ -561,6 +585,16 @@
       ? `${_jsonlHistory.length}:${data.conv.length}:${data.status}:${data.conv.at(-1)?.text?.length ?? 0}`
       : 'null';
     if (fp === _jsonlFp) return;
+    // TEMP DEBUG: report every native-view redraw (flicker investigation)
+    try {
+      const last = data?.conv?.at(-1);
+      api('POST', '/api/debug/render', {
+        at: new Date().toISOString(), session: currentSession, src: _jsonlSrc, prevFp: _jsonlFp, fp,
+        n: data?.conv?.length ?? null, total: data?.total ?? null, status: data?.status ?? null,
+        lastRole: last?.role, lastTs: last?.ts, lastLen: last?.text?.length,
+        hist: _jsonlHistory.length, minLen: _jsonlMinLen, ws: _wsCreated, ua: navigator.userAgent.slice(0, 60),
+      });
+    } catch {}
     _jsonlFp = fp;
     clearHtmlPreviews();
 
@@ -732,7 +766,7 @@
       const optimistic = { ...lastJsonlData, conv: [...lastJsonlData.conv, { role: 'user', text, ts: Date.now() }], status: 'thinking' };
       _jsonlMinLen = optimistic.conv.length;
       _jsonlMinLenExpiry = Date.now() + 10000;
-      renderJsonlView(optimistic);
+      _jsonlSrc = 'optimistic'; renderJsonlView(optimistic);
     }
 
     await api('POST', `/api/sessions/${currentSession}/input`, { text, enter: true });

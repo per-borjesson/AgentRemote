@@ -4,7 +4,7 @@ import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join, basename, resolve } from 'path';
-import { existsSync, readdirSync, statSync, mkdirSync } from 'fs';
+import { existsSync, readdirSync, statSync, mkdirSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import multer from 'multer';
 import {
@@ -13,9 +13,9 @@ import {
   setApprovalPending, respondToApproval, setSessionStatus,
   checkTmuxSizes, checkForResume, resumeSession, waitForResumeId,
   parseQuestionnaire, answerQuestionnaire, updateTokensFromOutput, updateProcessMemory,
-  dismissBackgroundPanel, sendRawKeys,
+  dismissBackgroundPanel, sendRawKeys, claudeSessionIds, acceptTrustPrompt,
 } from './sessions.js';
-import { listArchived, addArchived, removeArchived } from './archived.js';
+import { listArchived, addArchived, removeArchived, trackSession, untrackSession, listTracked } from './archived.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
 import { readJsonlConversation, readJsonlHistory } from './jsonl.js';
@@ -44,7 +44,20 @@ if (!AUTH_TOKEN) {
 
 const app = express();
 app.use(express.json());
-app.use(express.static(join(__dirname, '../public')));
+// Serve index.html with ?v= set to each asset's mtime, so browsers (and
+// Cloudflare's 4h browser-cache TTL) pick up new app.js/style.css immediately.
+const PUBLIC_DIR = join(__dirname, '../public');
+function serveIndex(req, res) {
+  const html = readFileSync(join(PUBLIC_DIR, 'index.html'), 'utf8').replace(
+    /(href|src)="\/([\w.-]+\.(?:js|css))\?v=[^"]*"/g,
+    (m, attr, file) => {
+      try { return `${attr}="/${file}?v=${Math.floor(statSync(join(PUBLIC_DIR, file)).mtimeMs)}"`; } catch { return m; }
+    }
+  );
+  res.set('Cache-Control', 'no-cache').type('html').send(html);
+}
+app.get(['/', '/index.html'], serveIndex);
+app.use(express.static(PUBLIC_DIR));
 
 // Auth middleware for API routes
 app.use('/api', (req, res, next) => {
@@ -54,6 +67,12 @@ app.use('/api', (req, res, next) => {
 });
 
 // REST API
+
+// TEMP DEBUG: native-view render timeline from clients (flicker investigation)
+app.post('/api/debug/render', (req, res) => {
+  console.log('[render-dbg]', JSON.stringify(req.body));
+  res.json({ ok: true });
+});
 app.get('/api/sessions', (req, res) => {
   res.json(listSessions());
 });
@@ -308,12 +327,32 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server });
 const clients = new Set();
 
+// Slow/half-dead connections (flaky mobile links) queue frames that then arrive
+// minutes late and overwrite fresh state in the UI. Every frame is a full
+// snapshot, so skip frames while a client is backed up, and drop it if the
+// backlog keeps growing — the client reconnects and gets current state.
+const WS_SKIP_BYTES = 512 * 1024;
+const WS_DROP_BYTES = 4 * 1024 * 1024;
+function sendFresh(client, data) {
+  if (client.readyState !== 1) return;
+  if (client.bufferedAmount > WS_DROP_BYTES) { client.terminate(); clients.delete(client); return; }
+  if (client.bufferedAmount > WS_SKIP_BYTES) return;
+  client.send(data);
+}
+
 function broadcast(msg) {
   const data = JSON.stringify(msg);
-  for (const client of clients) {
-    if (client.readyState === 1) client.send(data);
-  }
+  for (const client of clients) sendFresh(client, data);
 }
+
+// Heartbeat: terminate sockets that stop answering pings (phone slept, network gone)
+setInterval(() => {
+  for (const client of clients) {
+    if (client._alive === false) { client.terminate(); clients.delete(client); continue; }
+    client._alive = false;
+    try { client.ping(); } catch {}
+  }
+}, 30000);
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://localhost`);
@@ -324,6 +363,8 @@ wss.on('connection', (ws, req) => {
   }
 
   clients.add(ws);
+  ws._alive = true;
+  ws.on('pong', () => { ws._alive = true; });
   ws.send(JSON.stringify({ type: 'connected', sessions: listSessions(), archived: listArchived(), version: VERSION }));
 
   ws.on('message', (data) => {
@@ -412,6 +453,7 @@ setInterval(async () => {
     const output = await captureOutputAsync(session.name, 500);
     updateTokensFromOutput(session.name, output);
     dismissBackgroundPanel(session.name, output);
+    if (session.provider === 'claude') acceptTrustPrompt(session.name, output);
 
     const incoming = prov.extractResponses(output);
     mergeResponses(session.name, incoming);
@@ -420,7 +462,7 @@ setInterval(async () => {
     const jsonl = session.provider === 'claude' ? readJsonlConversation(resolveWorkdir(session)) : null;
     for (const client of clients) {
       if (client.readyState === 1 && client._watchSession === session.name) {
-        client.send(JSON.stringify({ type: 'output', session: session.name, output, conversation, questionnaire: questionnaire || null, jsonl }));
+        sendFresh(client, JSON.stringify({ type: 'output', session: session.name, output, conversation, questionnaire: questionnaire || null, jsonl }));
       }
     }
   }));
@@ -428,17 +470,55 @@ setInterval(async () => {
   broadcast({ type: 'sessions_update', sessions, archived: listArchived() });
 }, 2000);
 
+// Auto-archive: snapshot live Claude sessions (name → resume ID) to disk; a
+// tracked session that disappears without an explicit kill/archive (tmux server
+// died, service restart) is moved to the archive so it can be resumed.
+// Two consecutive misses are required so a transient tmux error doesn't archive everything.
+const missingCounts = new Map();
+function reconcileTracked(sessions) {
+  const ids = claudeSessionIds();
+  const live = new Set(sessions.map(s => s.name));
+  for (const session of sessions) {
+    const id = ids.get(session.name);
+    if (!id) continue;
+    trackSession({
+      name: session.name,
+      resumeId: id.sessionId,
+      task: session.task,
+      provider: 'claude',
+      workdir: session.workdir || id.cwd,
+    });
+  }
+  let archivedAny = false;
+  for (const [name, entry] of Object.entries(listTracked())) {
+    if (live.has(name)) { missingCounts.delete(name); continue; }
+    const misses = (missingCounts.get(name) || 0) + 1;
+    missingCounts.set(name, misses);
+    if (misses < 2) continue;
+    missingCounts.delete(name);
+    untrackSession(name);
+    addArchived({ ...entry, archivedAt: Date.now() });
+    archivedAny = true;
+    console.log(`[auto-archive] ${name} disappeared — archived with resume ID ${entry.resumeId}`);
+    sendNotification(`📦 Session *${name}* closed unexpectedly — archived, tap Resume in the app`).catch(() => {});
+  }
+  if (archivedAny) broadcast({ type: 'sessions_update', sessions, archived: listArchived() });
+}
+reconcileTracked(listSessions());
+
 // Slow loop (30s) — all sessions: approval/resume detection, memory, token
 // updates. Telegram notifications tolerate up to 30s delay; this cuts
 // per-minute process spawns by ~10× compared to doing it in the fast loop.
 setInterval(async () => {
   const sessions = listSessions();
+  reconcileTracked(sessions);
 
   await Promise.all(sessions.map(async session => {
     const output = await captureOutputAsync(session.name, 50);
     updateTokensFromOutput(session.name, output);
     await updateProcessMemory(session.name);
     dismissBackgroundPanel(session.name, output);
+    if (session.provider === 'claude') acceptTrustPrompt(session.name, output);
 
     // Approvals
     if (!session.pendingApproval && checkForApprovalPrompt(session.name, output)) {

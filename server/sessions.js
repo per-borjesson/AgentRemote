@@ -1,6 +1,9 @@
 import { execSync, execFileSync, exec } from 'child_process';
 import { promisify } from 'util';
+import { readdirSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { getProvider, DEFAULT_PROVIDER } from './providers.js';
+import { untrackSession } from './archived.js';
 
 const execAsync = promisify(exec);
 
@@ -207,6 +210,17 @@ export function createSession(name, task = null, provider = DEFAULT_PROVIDER, wo
       if (++checks >= 10) clearInterval(handle);
     }, 2000);
   }
+  // Claude shows a folder-trust prompt for untrusted dirs (and git worktrees,
+  // where trust is keyed on the main repo). Accept it quickly after launch;
+  // the polling loops also catch it later, e.g. when claude is started by hand.
+  if (provider === 'claude') {
+    let checks = 0;
+    const handle = setInterval(() => {
+      try {
+        if (acceptTrustPrompt(name, captureOutput(name, 30)) || ++checks >= 10) clearInterval(handle);
+      } catch { clearInterval(handle); }
+    }, 2000);
+  }
   return getSession(name);
 }
 
@@ -315,6 +329,29 @@ export function killSession(name) {
     tmux('kill-session', '-t', name);
   } catch {}
   sessionMeta.delete(name);
+  untrackSession(name); // intentional kill — don't auto-archive it later
+}
+
+// Map tmux session name → { sessionId, cwd } for live Claude processes.
+// Claude Code writes ~/.claude/sessions/<pid>.json including its tmux target.
+export function claudeSessionIds() {
+  const dir = join(process.env.HOME, '.claude', 'sessions');
+  const ids = new Map();
+  let files = [];
+  try { files = readdirSync(dir).filter(f => /^\d+\.json$/.test(f)); } catch { return ids; }
+  for (const f of files) {
+    try {
+      const info = JSON.parse(readFileSync(join(dir, f), 'utf8'));
+      process.kill(info.pid, 0); // throws if the process is gone (stale file)
+      const name = (info.tmux || '').split(':')[0];
+      if (!name || !info.sessionId) continue;
+      const prev = ids.get(name);
+      if (!prev || (info.updatedAt || 0) > prev.updatedAt) {
+        ids.set(name, { sessionId: info.sessionId, cwd: info.cwd, updatedAt: info.updatedAt || 0 });
+      }
+    } catch {}
+  }
+  return ids;
 }
 
 // The background-tasks panel (opened by monitor events) shows "Enter to view"
@@ -324,6 +361,31 @@ export function dismissBackgroundPanel(name, output) {
   if (/↑\/↓ to select.*Enter to view.*Esc to close/.test(clean)) {
     try { execSync(`tmux send-keys -t ${name} Escape`, { encoding: 'utf8' }); } catch {}
   }
+}
+
+// Auto-answer Claude's "Quick safety check … trust this folder" prompt with
+// "Yes, I trust this folder". Sessions here already run with
+// --dangerously-skip-permissions, so this adds no extra exposure. Only fires
+// when the prompt is the bottom of the pane (not old scrollback).
+const trustAnsweredAt = new Map();
+export function acceptTrustPrompt(name, output) {
+  const lines = output.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map(l => l.trim()).filter(Boolean);
+  const tail = lines.slice(-12);
+  if (!/Enter to confirm/.test(tail[tail.length - 1] || '')) return false;
+  if (!tail.some(l => /Quick safety check|trust this folder/i.test(l))) return false;
+  if (Date.now() - (trustAnsweredAt.get(name) || 0) < 5000) return true;
+  const options = tail.filter(l => /^(❯\s*)?(\d+\.\s*)?(Yes, I trust this folder|No, exit)/.test(l));
+  const cur = options.findIndex(l => l.startsWith('❯'));
+  const yes = options.findIndex(l => /Yes, I trust this folder/.test(l));
+  if (cur < 0 || yes < 0) return false;
+  trustAnsweredAt.set(name, Date.now());
+  const moves = Array(Math.abs(yes - cur)).fill(yes > cur ? 'Down' : 'Up');
+  try {
+    if (moves.length) execFileSync('tmux', ['send-keys', '-t', name, ...moves]);
+    setTimeout(() => { try { execFileSync('tmux', ['send-keys', '-t', name, 'Enter']); } catch {} }, 150);
+  } catch {}
+  console.log(`[trust] auto-accepted folder trust prompt in ${name}`);
+  return true;
 }
 
 export function checkForApprovalPrompt(name, output = null) {

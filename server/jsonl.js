@@ -37,6 +37,24 @@ function buildConv(workdir) {
     if (!line.trim()) continue;
     let entry;
     try { entry = JSON.parse(line); } catch { continue; }
+    // Messages typed while Claude is busy are queued and stored as a
+    // queued_command attachment, never as a user entry.
+    if (entry.type === 'attachment' && entry.isSidechain !== true) {
+      const a = entry.attachment;
+      if (a?.type === 'queued_command' && a.commandMode === 'prompt' && typeof a.prompt === 'string'
+          && (a.origin?.kind ?? 'human') === 'human') {
+        const text = a.prompt.trim();
+        if (text && !text.startsWith('<')) {
+          const uid = `u${userCount++}`;
+          msgMap.set(uid, { role: 'user', text, ts: entry.timestamp || a.timestamp || null });
+          order.push(uid);
+          lastRole = 'user';
+          lastStopReason = null;
+        }
+      }
+      continue;
+    }
+
     const msg = entry.message;
     if (!msg) continue;
 
