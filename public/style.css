@@ -118,6 +118,7 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
 .status-dot.running { background: var(--green); }
 .status-dot.waiting { background: var(--orange); animation: pulse 1.2s infinite; }
 .status-dot.done { background: var(--muted); }
+.status-dot.blocked { background: var(--red); animation: pulse 1.2s infinite; }
 
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
@@ -166,6 +167,8 @@ header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: -.0
   transition: border-color .15s;
 }
 .q-opt-btn:hover { border-color: #7b8cde; }
+.q-opt-btn small { display: block; font-size: .72rem; color: var(--muted); margin-top: .15rem; }
+.q-body { flex: 1 1 100%; font-size: .8rem; color: var(--muted); white-space: pre-line; }
 .q-opt-btn.q-checked { border-color: #7b8cde; color: #7b8cde; }
 .q-opt-btn.q-next, .q-opt-btn.q-sep {
   flex: 1 1 100%;

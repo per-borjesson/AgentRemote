@@ -69,6 +69,7 @@ export function listSessions() {
         resumeId: meta.resumeId || null,
         tokens: meta.tokens || null,
         memory: meta.memory || null,
+        dialog: meta.dialog || null,
       };
     });
 }
@@ -254,7 +255,7 @@ export function sendRawKeys(name, { keys = [], text = '' } = {}) {
 // Returns { question, items, cursorIdx } or null if no questionnaire is active.
 export function parseQuestionnaire(output) {
   const clean = output.replace(/\x1b\[[0-9;]*m/g, '');
-  if (!/Enter to select/.test(clean)) return null;
+  if (!/Enter to select/.test(clean)) return parseSelectDialog(clean);
 
   const lines = clean.split('\n');
   const items = [];
@@ -293,6 +294,58 @@ export function parseQuestionnaire(output) {
   return { question, items, cursorIdx };
 }
 
+// Claude's single-choice dialogs ("Resume this conversation?", folder trust,
+// etc.): footer "… Enter to confirm · Esc to dismiss" at the bottom of the pane,
+// options with or without numbers, cursor marked by ❯. Only the block between
+// the last ─── separator and the footer is parsed, so scrollback can't match.
+// Returns { kind: 'dialog', question, body, items, cursorIdx, canDismiss, needsMove }.
+function parseSelectDialog(clean) {
+  const lines = clean.split('\n');
+  let end = lines.length - 1;
+  while (end >= 0 && !lines[end].trim()) end--;
+  const footer = lines[end] || '';
+  if (!/Enter to confirm/.test(footer)) return null;
+  let start = end - 1;
+  while (start >= 0 && !/^\s*─{5,}/.test(lines[start])) start--;
+  const block = lines.slice(start + 1, end);
+  const cur = block.findIndex(l => /^\s*❯\s/.test(l));
+  if (cur < 0) return null;
+  const optIndent = block[cur].indexOf('❯') + 2;
+  const isOpt = l => l.trim() && l.search(/\S/) === optIndent;
+  let first = cur, last = cur;
+  while (first > 0 && isOpt(block[first - 1])) first--;
+  while (last < block.length - 1 && isOpt(block[last + 1])) last++;
+  const items = block.slice(first, last + 1).map(l => {
+    const [label, ...hint] = l.replace(/^\s*❯?\s*/, '').replace(/^\d+\.\s+/, '').split(/\s{2,}/);
+    return { label: label.trim(), hint: hint.join(' ').trim() };
+  });
+  const text = block.slice(0, first).map(l => l.trim()).filter(Boolean);
+  return {
+    kind: 'dialog',
+    question: text[0] || '',
+    body: text.slice(1).join('\n'),
+    items,
+    cursorIdx: cur - first,
+    canDismiss: /Esc to (?:dismiss|cancel)/.test(footer),
+    // "↑/↓ to pick a row first": Enter is ignored until an arrow key is pressed
+    needsMove: /pick a row first/.test(footer),
+  };
+}
+
+// Track whether a session is blocked on a dialog/questionnaire at the bottom of
+// its pane (footer within the last few lines, so stale scrollback doesn't count).
+// Returns true only when the session newly became blocked.
+export function updateSessionDialog(name, output) {
+  const meta = sessionMeta.get(name);
+  if (!meta) return false;
+  const tail = output.replace(/\x1b\[[0-9;]*m/g, '').split('\n').filter(l => l.trim()).slice(-8).join('\n');
+  const q = /Enter to (?:select|confirm)/.test(tail) ? parseQuestionnaire(output) : null;
+  const question = q ? (q.question || 'Waiting for a choice') : null;
+  const wasBlocked = !!meta.dialog;
+  meta.dialog = question;
+  return !!question && !wasBlocked;
+}
+
 // Navigate to targetIdx and press Enter. Re-reads output to get fresh cursor position.
 export function answerQuestionnaire(name, targetIdx) {
   const output = captureOutput(name, 60);
@@ -300,6 +353,14 @@ export function answerQuestionnaire(name, targetIdx) {
   const cursorIdx = q ? q.cursorIdx : 0;
   const delta = targetIdx - cursorIdx;
   const key = delta >= 0 ? 'Down' : 'Up';
+  if (delta === 0 && q?.needsMove && q.items.length > 1) {
+    // Step off and back, away from the edge so wrap/no-wrap both end on target
+    const [a, b] = cursorIdx === 0 ? ['Down', 'Up'] : ['Up', 'Down'];
+    execFileSync('tmux', ['send-keys', '-t', name, a]);
+    execSync('sleep 0.05');
+    execFileSync('tmux', ['send-keys', '-t', name, b]);
+    execSync('sleep 0.05');
+  }
   // Small delay between keypresses to prevent the TUI from dropping rapid input
   for (let i = 0; i < Math.abs(delta); i++) {
     execSync(`tmux send-keys -t ${name} ${key}`, { encoding: 'utf8' });

@@ -13,7 +13,7 @@ import {
   setApprovalPending, respondToApproval, setSessionStatus,
   checkTmuxSizes, checkForResume, resumeSession, waitForResumeId,
   parseQuestionnaire, answerQuestionnaire, updateTokensFromOutput, updateProcessMemory,
-  dismissBackgroundPanel, sendRawKeys, claudeSessionIds, acceptTrustPrompt,
+  dismissBackgroundPanel, sendRawKeys, claudeSessionIds, acceptTrustPrompt, updateSessionDialog,
 } from './sessions.js';
 import { listArchived, addArchived, removeArchived, trackSession, untrackSession, listTracked } from './archived.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
@@ -439,6 +439,17 @@ function addUserMessage(name, text) {
   conversations.set(name, conv);
 }
 
+// Session waiting on a Claude dialog/questionnaire: flag it (red dot in the
+// list) and notify Telegram once per occurrence.
+function checkDialog(session, output) {
+  if (session.provider !== 'claude') return;
+  if (!updateSessionDialog(session.name, output)) return;
+  const meta = listSessions().find(s => s.name === session.name);
+  const q = (meta?.dialog || '').replace(/[*_`\[\]]/g, '');
+  console.log(`[dialog] ${session.name} waiting: ${q}`);
+  sendNotification(`🔴 Session *${session.name}* is waiting on a dialog: "${q}" — open the app to answer`).catch(() => {});
+}
+
 // Fast loop (2s) — watched sessions only: capture output and stream to UI.
 // One captureOutputAsync per watched session; idle cost is near-zero when
 // nobody has the browser open.
@@ -454,6 +465,7 @@ setInterval(async () => {
     updateTokensFromOutput(session.name, output);
     dismissBackgroundPanel(session.name, output);
     if (session.provider === 'claude') acceptTrustPrompt(session.name, output);
+    checkDialog(session, output);
 
     const incoming = prov.extractResponses(output);
     mergeResponses(session.name, incoming);
@@ -519,6 +531,7 @@ setInterval(async () => {
     await updateProcessMemory(session.name);
     dismissBackgroundPanel(session.name, output);
     if (session.provider === 'claude') acceptTrustPrompt(session.name, output);
+    checkDialog(session, output);
 
     // Approvals
     if (!session.pendingApproval && checkForApprovalPrompt(session.name, output)) {

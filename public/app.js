@@ -169,7 +169,7 @@
 
     const activeHtml = sorted.map(s => `
       <div class="session-card" data-name="${s.name}">
-        <div class="status-dot ${s.status}"></div>
+        <div class="status-dot ${s.dialog ? 'blocked' : s.status}"${s.dialog ? ` title="${esc(s.dialog)}"` : ''}></div>
         <div class="info">
           <div class="name">${esc(s.name)} <span class="provider-badge">${esc(providerIcon(s.provider))}</span></div>
           <div class="task">${esc(s.task || '—')}</div>
@@ -675,6 +675,18 @@
   function showQuestionnaireBanner(q) {
     activeQuestionnaire = q;
     qQuestion.textContent = q.question || '';
+    if (q.kind === 'dialog') {
+      // Claude single-choice dialog (Resume conversation?, folder trust, …)
+      qOptions.innerHTML =
+        (q.body ? `<div class="q-body">${escNl(q.body)}</div>` : '') +
+        q.items.map((item, idx) =>
+          `<button class="q-opt-btn" data-idx="${idx}">${esc(item.label)}` +
+          (item.hint ? `<small>${esc(item.hint)}</small>` : '') + `</button>`
+        ).join('') +
+        (q.canDismiss ? `<button class="q-opt-btn q-sep" data-dismiss="1">Dismiss (Esc)</button>` : '');
+      qBanner.classList.remove('hidden');
+      return;
+    }
     // Only render numbered/checkbox options — not Next/navigation items
     qOptions.innerHTML = q.items
       .map((item, idx) => ({ item, idx }))
@@ -694,9 +706,11 @@
   }
 
   qOptions.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-idx], [data-submit]');
+    const btn = e.target.closest('[data-idx], [data-submit], [data-dismiss]');
     if (!btn) return;
-    if (btn.dataset.submit) {
+    if (btn.dataset.dismiss) {
+      await api('POST', `/api/sessions/${currentSession}/keys`, { keys: ['Escape'] });
+    } else if (btn.dataset.submit) {
       // Find the Next item index (for navigation) or default past all items
       const nextIdx = activeQuestionnaire
         ? activeQuestionnaire.items.findIndex(item => item.isNext)
