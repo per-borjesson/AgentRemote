@@ -68,11 +68,6 @@ app.use('/api', (req, res, next) => {
 
 // REST API
 
-// TEMP DEBUG: native-view render timeline from clients (flicker investigation)
-app.post('/api/debug/render', (req, res) => {
-  console.log('[render-dbg]', JSON.stringify(req.body));
-  res.json({ ok: true });
-});
 app.get('/api/sessions', (req, res) => {
   res.json(listSessions());
 });
