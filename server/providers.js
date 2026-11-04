@@ -186,7 +186,8 @@ export const PROVIDERS = {
       const cmd = task ? `claude --dangerously-skip-permissions "${esc(task)}"` : `claude --dangerously-skip-permissions`;
       return `${cleanEnv} ${cmd}`;
     },
-    resumePattern: /claude --resume ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/,
+    // Newer versions repeat the launch flags: "claude --dangerously-skip-permissions --resume <id>"
+    resumePattern: /claude(?: --?[\w-]+)* --resume ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/,
     extractResponses: extractClaudeResponses,
     approvalPatterns: [
       /\[Y\/n\]/,
