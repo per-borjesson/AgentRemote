@@ -266,15 +266,15 @@ app.post('/api/sessions/:name/archive', async (req, res) => {
   if (!session) return res.status(404).json({ error: 'session not found' });
   res.json({ ok: true }); // respond immediately; work continues in background
   // Claude's live session ID, in case the exit message can't be parsed
-  const liveId = session.provider === 'claude' ? claudeSessionIds().get(req.params.name)?.sessionId : null;
+  const live = session.provider === 'claude' ? claudeSessionIds().get(req.params.name) : null;
   sendKeys(req.params.name, '/exit', true);
-  const resumeId = await waitForResumeId(req.params.name) || liveId;
+  const resumeId = await waitForResumeId(req.params.name) || live?.sessionId;
   const entry = {
     name: req.params.name,
     resumeId: resumeId || null,
     task: session.task,
     provider: session.provider,
-    workdir: session.workdir,
+    workdir: session.workdir || live?.cwd || null,
     archivedAt: Date.now(),
   };
   addArchived(entry);
