@@ -332,6 +332,21 @@ function parseSelectDialog(clean) {
   };
 }
 
+// True when Claude's turn ended on "API Error: Connection lost mid-response"
+// (server-side stream cut) and the session is idle: nothing after the error
+// but the empty input box — no new response, no typed draft, not running.
+export function endedOnStreamDrop(output) {
+  // Drop the right-hand side panel ("│ …") that some panes show
+  const lines = output.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map(l => l.split('│')[0]);
+  let i = lines.length - 1;
+  while (i >= 0 && !/^● API Error: Connection lost mid-response/.test(lines[i])) i--;
+  if (i < 0) return false;
+  const after = lines.slice(i + 1);
+  if (after.some(l => /^\s*●\s/.test(l) || /^❯\s*\S/.test(l))) return false;
+  if (after.some(l => /esc to interrupt/.test(l))) return false;
+  return after.some(l => /^❯\s*$/.test(l)); // input box visible and empty
+}
+
 // Track whether a session is blocked on a dialog/questionnaire at the bottom of
 // its pane (footer within the last few lines, so stale scrollback doesn't count).
 // Returns true only when the session newly became blocked.

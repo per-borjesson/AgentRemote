@@ -13,7 +13,7 @@ import {
   setApprovalPending, respondToApproval, setSessionStatus,
   checkTmuxSizes, checkForResume, resumeSession, waitForResumeId,
   parseQuestionnaire, answerQuestionnaire, updateTokensFromOutput, updateProcessMemory,
-  dismissBackgroundPanel, sendRawKeys, claudeSessionIds, acceptTrustPrompt, updateSessionDialog,
+  dismissBackgroundPanel, sendRawKeys, claudeSessionIds, acceptTrustPrompt, updateSessionDialog, endedOnStreamDrop,
 } from './sessions.js';
 import { listArchived, addArchived, removeArchived, trackSession, untrackSession, listTracked } from './archived.js';
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
@@ -447,6 +447,37 @@ function checkDialog(session, output) {
   sendNotification(`🔴 Session *${session.name}* is waiting on a dialog: "${q}" — open the app to answer`).catch(() => {});
 }
 
+// Auto-continue after "Connection lost mid-response" (Anthropic-side stream
+// cut). Acts only when the error is seen on two checks ≥20s apart, so the user
+// gets a chance to reply first; at most 3 per session per 30 min.
+const streamDrops = new Map(); // name → { seenAt, sent: [timestamps] }
+const AUTO_CONTINUE_MAX = 3, AUTO_CONTINUE_WINDOW = 30 * 60 * 1000;
+function checkStreamDrop(session, output) {
+  if (session.provider !== 'claude') return;
+  const st = streamDrops.get(session.name) || { seenAt: 0, sent: [] };
+  streamDrops.set(session.name, st);
+  if (!endedOnStreamDrop(output)) { st.seenAt = 0; return; }
+  const now = Date.now();
+  if (!st.seenAt) { st.seenAt = now; return; }
+  if (now - st.seenAt < 20000) return;
+  st.seenAt = 0;
+  st.sent = st.sent.filter(t => now - t < AUTO_CONTINUE_WINDOW);
+  if (st.sent.length >= AUTO_CONTINUE_MAX) {
+    if (!st.gaveUp) {
+      st.gaveUp = true;
+      console.log(`[auto-continue] ${session.name}: limit reached, leaving it`);
+      sendNotification(`⚠️ Session *${session.name}* keeps losing the API connection — auto-continue stopped after ${AUTO_CONTINUE_MAX} tries. Send "continue" yourself.`).catch(() => {});
+    }
+    return;
+  }
+  st.gaveUp = false;
+  st.sent.push(now);
+  console.log(`[auto-continue] ${session.name}: connection lost mid-response — sending "continue" (${st.sent.length}/${AUTO_CONTINUE_MAX})`);
+  sendKeys(session.name, 'continue', true).catch(() => {});
+  addUserMessage(session.name, 'continue');
+  sendNotification(`🔁 Session *${session.name}* lost the API connection mid-response — sent "continue" automatically (${st.sent.length}/${AUTO_CONTINUE_MAX})`).catch(() => {});
+}
+
 // Fast loop (2s) — watched sessions only: capture output and stream to UI.
 // One captureOutputAsync per watched session; idle cost is near-zero when
 // nobody has the browser open.
@@ -529,6 +560,7 @@ setInterval(async () => {
     dismissBackgroundPanel(session.name, output);
     if (session.provider === 'claude') acceptTrustPrompt(session.name, output);
     checkDialog(session, output);
+    checkStreamDrop(session, output);
 
     // Approvals
     if (!session.pendingApproval && checkForApprovalPrompt(session.name, output)) {
