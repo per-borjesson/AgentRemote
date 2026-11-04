@@ -18,6 +18,13 @@ function activeJsonl(projectPath) {
   } catch { return null; }
 }
 
+// Pasted text arrives wrapped as <pasted_content id="…">…</pasted_content id="…">
+// (the user's own words included) — unwrap it so the '<' filter below doesn't
+// mistake it for an internal command injection.
+function unwrapPaste(text) {
+  return text.replace(/<\/?pasted_content\b[^>]*>/g, '').trim();
+}
+
 function buildConv(workdir) {
   const dir = projectDir(workdir);
   if (!dir) return null;
@@ -43,7 +50,7 @@ function buildConv(workdir) {
       const a = entry.attachment;
       if (a?.type === 'queued_command' && a.commandMode === 'prompt' && typeof a.prompt === 'string'
           && (a.origin?.kind ?? 'human') === 'human') {
-        const text = a.prompt.trim();
+        const text = unwrapPaste(a.prompt);
         if (text && !text.startsWith('<')) {
           const uid = `u${userCount++}`;
           msgMap.set(uid, { role: 'user', text, ts: entry.timestamp || a.timestamp || null });
@@ -67,6 +74,7 @@ function buildConv(workdir) {
         if (!textBlocks.length) continue; // skip tool_result-only entries
         text = textBlocks.map(c => c.text).join('').trim();
       }
+      text = unwrapPaste(text);
       if (!text || text.startsWith('<')) continue; // skip internal command/caveat injections
       if (text.startsWith('This session is being continued from a previous conversation')) continue;
       if (text.startsWith('Base directory for this skill:')) continue; // skip skill injection blocks
