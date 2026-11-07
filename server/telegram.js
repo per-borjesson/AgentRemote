@@ -443,13 +443,25 @@ export function initTelegram(token, targetChatId, onBroadcast) {
     if (action === 'do-disconnect') await disconnect('Disconnected.');
   }));
 
+  // The library keeps polling after errors on its own. Calling startPolling()
+  // while it still is cancels the request but not its reschedule, leaving two
+  // loops that 409-conflict each other forever — so only restart if stopped.
+  // Errors are logged at most once a minute (with a count) to spare the journal.
   let pollingRestartPending = false;
+  let pollErrCount = 0, pollErrLoggedAt = 0;
   bot.on('polling_error', (err) => {
-    console.error('[telegram] polling error:', err.message);
+    pollErrCount++;
+    if (Date.now() - pollErrLoggedAt > 60000) {
+      console.error(`[telegram] polling error (${pollErrCount} in last period):`, err.message);
+      pollErrLoggedAt = Date.now();
+      pollErrCount = 0;
+    }
     if (err.code === 'EFATAL' && !pollingRestartPending) {
       pollingRestartPending = true;
       setTimeout(() => {
         pollingRestartPending = false;
+        if (bot.isPolling()) return;
+        console.log('[telegram] polling had stopped — restarting');
         bot.startPolling().catch(e => console.error('[telegram] polling restart failed:', e.message));
       }, 5000);
     }
