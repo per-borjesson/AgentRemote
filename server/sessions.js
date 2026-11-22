@@ -29,7 +29,7 @@ function detectProvider(name) {
   } catch {}
   try {
     const out = execSync(`tmux capture-pane -t ${name} -p -S -500`, { encoding: 'utf8' });
-    if (/claude --dangerously/m.test(out)) return 'claude';
+    if (/\bclaude\b.*--(?:dangerously-skip-permissions|resume)\b/m.test(out)) return 'claude';
     if (/gemini --skip-trust/m.test(out)) return 'gemini';
     if (/codex --no-alt-screen/m.test(out)) return 'codex';
   } catch {}
