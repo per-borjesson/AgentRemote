@@ -452,11 +452,14 @@ function checkDialog(session, output) {
 // gets a chance to reply first; at most 3 per session per 30 min.
 const streamDrops = new Map(); // name → { seenAt, sent: [timestamps] }
 const AUTO_CONTINUE_MAX = 3, AUTO_CONTINUE_WINDOW = 30 * 60 * 1000;
-function checkStreamDrop(session, output) {
+async function checkStreamDrop(session, output) {
   if (session.provider !== 'claude') return;
   const st = streamDrops.get(session.name) || { seenAt: 0, sent: [] };
   streamDrops.set(session.name, st);
-  if (!endedOnStreamDrop(output)) { st.seenAt = 0; return; }
+  // Cheap text check first; re-capture with escapes only when the error is on screen
+  const dropped = /Connection lost mid-response/.test(output)
+    && endedOnStreamDrop(await captureOutputAsync(session.name, 50, { escapes: true }));
+  if (!dropped) { st.seenAt = 0; return; }
   const now = Date.now();
   if (!st.seenAt) { st.seenAt = now; return; }
   if (now - st.seenAt < 20000) return;
@@ -560,7 +563,7 @@ setInterval(async () => {
     dismissBackgroundPanel(session.name, output);
     if (session.provider === 'claude') acceptTrustPrompt(session.name, output);
     checkDialog(session, output);
-    checkStreamDrop(session, output);
+    await checkStreamDrop(session, output);
 
     // Approvals
     if (!session.pendingApproval && checkForApprovalPrompt(session.name, output)) {

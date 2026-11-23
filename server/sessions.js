@@ -335,9 +335,14 @@ function parseSelectDialog(clean) {
 // True when Claude's turn ended on "API Error: Connection lost mid-response"
 // (server-side stream cut) and the session is idle: nothing after the error
 // but the empty input box — no new response, no typed draft, not running.
+// Pass output captured with escapes (-e) so dimmed text — Claude's suggested
+// next prompt or "Press up to edit queued messages" — isn't taken for a draft.
 export function endedOnStreamDrop(output) {
+  const plain = output
+    .replace(/\x1b\[2m[\s\S]*?(?=\x1b\[(?:0|22)?m|\n)/g, '')
+    .replace(/\x1b\[[0-9;]*m/g, '');
   // Drop the right-hand side panel ("│ …") that some panes show
-  const lines = output.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map(l => l.split('│')[0]);
+  const lines = plain.split('\n').map(l => l.split('│')[0]);
   let i = lines.length - 1;
   while (i >= 0 && !/^● API Error: Connection lost mid-response/.test(lines[i])) i--;
   if (i < 0) return false;
@@ -392,9 +397,9 @@ export function captureOutput(name, lines = 100) {
   }
 }
 
-export async function captureOutputAsync(name, lines = 100) {
+export async function captureOutputAsync(name, lines = 100, { escapes = false } = {}) {
   try {
-    return await tmuxAsync('capture-pane', '-t', name, '-p', '-S', `-${lines}`);
+    return await tmuxAsync('capture-pane', '-t', name, '-p', ...(escapes ? ['-e'] : []), '-S', `-${lines}`);
   } catch {
     return '';
   }
