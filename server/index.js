@@ -19,6 +19,7 @@ import { listArchived, addArchived, removeArchived, trackSession, untrackSession
 import { initTelegram, sendApprovalRequest, sendNotification } from './telegram.js';
 import { getProvider } from './providers.js';
 import { readJsonlConversation, readJsonlHistory } from './jsonl.js';
+import { ttsAvailable, registerTts, streamTts } from './tts.js';
 import { getSettings, saveSection, saveCustom, deleteCustom, saveAiProvider, deleteAiProvider, testTelegram, testEmail, startClaudeLogin, getClaudeStatus, startCodexLogin, getCodexOAuthStatus, readEnvFile } from './settings.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -67,6 +68,15 @@ app.use('/api', (req, res, next) => {
 });
 
 // REST API
+
+// Text-to-speech: register text, then stream MP3 from GET (usable as <audio src>)
+app.post('/api/tts', (req, res) => {
+  if (!ttsAvailable()) return res.status(503).json({ error: 'tts not installed' });
+  const { text, lang } = req.body || {};
+  if (!text) return res.status(400).json({ error: 'text required' });
+  res.json({ id: registerTts(text, lang) });
+});
+app.get('/api/tts/:id', (req, res) => streamTts(req.params.id, res));
 
 app.get('/api/sessions', (req, res) => {
   res.json(listSessions());

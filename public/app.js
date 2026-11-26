@@ -1105,8 +1105,6 @@
 
   // --- Text-to-speech ---
   let _ttsBtn = null;
-  let _silentCtx = null;
-  let _silentEl = null;
 
   function ttsStripMarkdown(text) {
     return text
@@ -1129,11 +1127,10 @@
     return text.match(/[^.!?\n]+[.!?\n]*/g)?.map(s => s.trim()).filter(Boolean) || [text];
   }
 
-  // Generate a silent WAV data URL — looping <audio> with real content is what
-  // Android Chrome recognises as active media, preventing tab throttling when
-  // the screen turns off. A MediaStream is not enough on some Android builds.
-  function makeSilentWav(durationSec = 2, sampleRate = 8000) {
-    const n = durationSec * sampleRate;
+  // Generate a silent WAV data URL, used to unlock the audio element inside
+  // the tap handler (autoplay rules) before the real stream URL is known.
+  function makeSilentWav(durationSec = 0.1, sampleRate = 8000) {
+    const n = Math.round(durationSec * sampleRate);
     const buf = new ArrayBuffer(44 + n);
     const v = new DataView(buf);
     const s = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
@@ -1143,56 +1140,63 @@
     v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate, true);
     v.setUint16(32, 1, true); v.setUint16(34, 8, true);
     s(36, 'data'); v.setUint32(40, n, true);
+    new Uint8Array(buf, 44).fill(128);
     let bin = ''; const u8 = new Uint8Array(buf);
     for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
     return 'data:audio/wav;base64,' + btoa(bin);
   }
   const _silentSrc = makeSilentWav();
 
-  function startSilentStream() {
-    if (_silentEl) return;
-    try {
-      _silentEl = document.createElement('audio');
-      _silentEl.src = _silentSrc;
-      _silentEl.loop = true;
-      _silentEl.volume = 0.001;
-      _silentEl.play().catch(() => {});
-    } catch {}
+  // Read-aloud plays server-generated MP3 (Piper TTS) through one <audio>
+  // element: unlike the Web Speech API, Android keeps media playing with the
+  // screen off and shows lock-screen controls. Falls back to speechSynthesis.
+  const _ttsAudio = new Audio();
+  _ttsAudio.preload = 'auto';
+  _ttsAudio.addEventListener('playing', () => { if (_ttsBtn && _ttsAudio.src !== _silentSrc) _ttsBtn.textContent = '⏹'; });
+  _ttsAudio.addEventListener('ended', () => { if (_ttsAudio.src !== _silentSrc) ttsStop(); });
+
+  function ttsSetMediaSession() {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.metadata = new MediaMetadata({ title: currentSession || 'AgentRemote', artist: 'AgentRemote — reading aloud' });
+    navigator.mediaSession.setActionHandler('play', () => _ttsAudio.play().catch(() => {}));
+    navigator.mediaSession.setActionHandler('pause', () => _ttsAudio.pause());
+    navigator.mediaSession.setActionHandler('stop', ttsStop);
   }
 
-  function stopSilentStream() {
-    try { if (_silentEl) _silentEl.pause(); } catch {}
-    _silentEl = null;
-    _silentCtx = null;
-  }
-
-  function ttsSpeak(text, btn) {
-    window.speechSynthesis.cancel();
-    stopSilentStream();
-    if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
-    if (_ttsBtn === btn) { _ttsBtn = null; return; }
+  async function ttsSpeak(text, btn) {
+    const same = _ttsBtn === btn;
+    ttsStop();
+    if (same) return;
 
     const clean = ttsStripMarkdown(text);
     const lang = ttsDetectLang(clean);
-    const chunks = ttsChunks(clean);
+    _ttsBtn = btn;
+    btn.textContent = '⏳';
+    btn.classList.add('tts-active');
 
+    // Unlock playback synchronously, inside the tap
+    _ttsAudio.src = _silentSrc;
+    _ttsAudio.play().catch(() => {});
+    try {
+      const { id } = await api('POST', '/api/tts', { text: clean, lang: lang.startsWith('sv') ? 'sv' : 'en' });
+      if (_ttsBtn !== btn || !id) throw new Error('cancelled');
+      _ttsAudio.src = `/api/tts/${id}?token=${encodeURIComponent(token)}`;
+      ttsSetMediaSession();
+      await _ttsAudio.play();
+    } catch (e) {
+      if (_ttsBtn !== btn) return;
+      ttsSpeakBrowser(clean, lang, btn);
+    }
+  }
+
+  // Fallback: browser speech (stops when the screen turns off on Android)
+  function ttsSpeakBrowser(clean, lang, btn) {
+    const chunks = ttsChunks(clean);
     const voices = window.speechSynthesis.getVoices();
     const voice = voices.find(v => v.lang === lang && v.localService)
       || voices.find(v => v.lang.startsWith(lang.split('-')[0]) && v.localService)
       || voices.find(v => v.lang.startsWith(lang.split('-')[0]));
-
-    _ttsBtn = btn;
     btn.textContent = '⏹';
-    btn.classList.add('tts-active');
-
-    startSilentStream();
-
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: 'AgentRemote', artist: 'Reading…' });
-      navigator.mediaSession.setActionHandler('pause', ttsStop);
-      navigator.mediaSession.setActionHandler('stop', ttsStop);
-    }
-
     let idx = 0;
     function next() {
       if (idx >= chunks.length || _ttsBtn !== btn) { ttsStop(); return; }
@@ -1208,7 +1212,9 @@
 
   function ttsStop() {
     window.speechSynthesis.cancel();
-    stopSilentStream();
+    _ttsAudio.pause();
+    _ttsAudio.removeAttribute('src');
+    _ttsAudio.load(); // aborts the stream so the server stops generating
     if (_ttsBtn) { _ttsBtn.textContent = '🔊'; _ttsBtn.classList.remove('tts-active'); }
     _ttsBtn = null;
   }
